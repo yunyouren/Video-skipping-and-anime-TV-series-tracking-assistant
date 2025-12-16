@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Bilibili 强力跳略助手",
+  "version": "2.0",
+  "description": "Shift+箭头跳略，支持自定义跳过秒数。",
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  },
+  "permissions": [
+    "storage"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icon.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.bilibili.com/video/*", "*://*.bilibili.com/bangumi/play/*"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ]
+}

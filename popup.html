@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { width: 200px; padding: 10px; font-family: sans-serif; text-align: center; }
+    h3 { margin: 5px 0 15px 0; color: #00aeec; }
+    input { width: 60px; padding: 5px; text-align: center; font-size: 16px; border: 1px solid #ccc; border-radius: 4px; }
+    button { 
+      margin-top: 15px; width: 100%; padding: 8px; 
+      background-color: #00aeec; color: white; border: none; 
+      border-radius: 4px; cursor: pointer; font-size: 14px;
+    }
+    button:hover { background-color: #009cd6; }
+    #status { margin-top: 10px; font-size: 12px; color: green; height: 15px; }
+  </style>
+</head>
+<body>
+  <h3>⚡ 跳略设置</h3>
+  <div>
+    每次跳过 
+    <input type="number" id="skipTime" value="90" min="1"> 
+    秒
+  </div>
+  <button id="saveBtn">保存设置</button>
+  <div id="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>
