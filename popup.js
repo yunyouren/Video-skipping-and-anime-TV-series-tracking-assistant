@@ -1,25 +1,26 @@
 // popup.js
 
-// 1. 初始化：回显数据
 document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.local.get({
         autoSkipEnable: false,
         introTime: 90,
         outroTime: 0,
         manualSkipTime: 90,
-        minDuration: 300 // 新增：默认300秒(5分钟)以下的视频不触发自动跳过
+        minDuration: 300,
+        autoPlayNext: false // 新增字段
     }, (items) => {
         document.getElementById('autoSkipEnable').checked = items.autoSkipEnable;
         document.getElementById('introTime').value = items.introTime;
         document.getElementById('outroTime').value = items.outroTime;
         document.getElementById('manualSkipTime').value = items.manualSkipTime;
-        document.getElementById('minDuration').value = items.minDuration; // 回显
+        document.getElementById('minDuration').value = items.minDuration;
+        document.getElementById('autoPlayNext').checked = items.autoPlayNext; // 回显
         
         updateStatusText(items.autoSkipEnable);
     });
 });
 
-// 2. 监听开关变化
+// 监听主开关
 document.getElementById('autoSkipEnable').addEventListener('change', (e) => {
     const isEnabled = e.target.checked;
     chrome.storage.local.set({ autoSkipEnable: isEnabled }, () => {
@@ -28,14 +29,15 @@ document.getElementById('autoSkipEnable').addEventListener('change', (e) => {
     });
 });
 
-// 3. 保存全部设置
+// 保存所有设置
 document.getElementById('saveBtn').addEventListener('click', () => {
     const config = {
         autoSkipEnable: document.getElementById('autoSkipEnable').checked, 
         introTime: parseInt(document.getElementById('introTime').value) || 0,
         outroTime: parseInt(document.getElementById('outroTime').value) || 0,
         manualSkipTime: parseInt(document.getElementById('manualSkipTime').value) || 90,
-        minDuration: parseInt(document.getElementById('minDuration').value) || 0 // 保存新设置
+        minDuration: parseInt(document.getElementById('minDuration').value) || 0,
+        autoPlayNext: document.getElementById('autoPlayNext').checked // 保存切集开关
     };
 
     chrome.storage.local.set(config, () => {
@@ -56,7 +58,6 @@ function showTempMessage(msg) {
     statusDiv.dataset.tempMessage = 'true';
     statusDiv.textContent = msg;
     statusDiv.style.color = '#00aeec';
-    
     setTimeout(() => {
         delete statusDiv.dataset.tempMessage;
         const isEnabled = document.getElementById('autoSkipEnable').checked;
