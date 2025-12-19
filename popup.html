@@ -3,26 +3,70 @@
 <head>
   <meta charset="UTF-8">
   <style>
-    body { width: 200px; padding: 10px; font-family: sans-serif; text-align: center; }
-    h3 { margin: 5px 0 15px 0; color: #00aeec; }
-    input { width: 60px; padding: 5px; text-align: center; font-size: 16px; border: 1px solid #ccc; border-radius: 4px; }
+    body { width: 230px; padding: 15px; font-family: "Segoe UI", sans-serif; color: #333; }
+    h3 { margin: 0 0 15px 0; color: #00aeec; font-size: 16px; border-bottom: 2px solid #f1f2f3; padding-bottom: 8px;}
+    
+    .section { margin-bottom: 15px; }
+    .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 13px;}
+    
+    input[type="number"] { width: 50px; padding: 4px; text-align: center; border: 1px solid #ddd; border-radius: 4px; }
+    
+    /* 开关样式 */
+    .switch { position: relative; display: inline-block; width: 36px; height: 20px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 20px; }
+    .slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+    input:checked + .slider { background-color: #00aeec; }
+    input:checked + .slider:before { transform: translateX(16px); }
+
     button { 
-      margin-top: 15px; width: 100%; padding: 8px; 
-      background-color: #00aeec; color: white; border: none; 
-      border-radius: 4px; cursor: pointer; font-size: 14px;
+      width: 100%; padding: 8px; background-color: #00aeec; color: white; 
+      border: none; border-radius: 4px; cursor: pointer; font-weight: bold;
     }
     button:hover { background-color: #009cd6; }
-    #status { margin-top: 10px; font-size: 12px; color: green; height: 15px; }
+    #status { margin-top: 8px; font-size: 12px; color: green; text-align: center; height: 16px; }
+    
+    /* 新增：提示文字样式 */
+    .hint { font-size: 11px; color: #888; margin-top: -5px; margin-bottom: 10px; }
   </style>
 </head>
 <body>
-  <h3>⚡ 跳略设置</h3>
-  <div>
-    每次跳过 
-    <input type="number" id="skipTime" value="90" min="1"> 
-    秒
+  <h3>⚡ B站跳略助手 Pro</h3>
+
+  <div class="section">
+    <div class="row">
+      <span><b>启用自动跳过</b></span>
+      <label class="switch">
+        <input type="checkbox" id="autoSkipEnable">
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="row">
+      <span>跳过片头 (秒)</span>
+      <input type="number" id="introTime" min="0">
+    </div>
+    <div class="row">
+      <span>跳过片尾 (秒)</span>
+      <input type="number" id="outroTime" min="0">
+    </div>
+    
+    <div class="row" style="margin-top: 10px; color: #ff6600;">
+      <span>短视频保护 (秒)</span>
+      <input type="number" id="minDuration" min="0" placeholder="0">
+    </div>
+    <div class="hint">视频总长小于此值时不自动跳过</div>
   </div>
-  <button id="saveBtn">保存设置</button>
+
+  <hr style="border:0; border-top:1px solid #eee; margin:10px 0;">
+
+  <div class="section">
+    <div class="row">
+      <span>Shift+箭头跨度</span>
+      <input type="number" id="manualSkipTime" min="1">
+    </div>
+  </div>
+
+  <button id="saveBtn">保存全部设置</button>
   <div id="status"></div>
   <script src="popup.js"></script>
 </body>

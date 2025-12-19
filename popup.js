@@ -1,23 +1,65 @@
-// 1. 当弹窗打开时，从存储中读取之前保存的时间，填入输入框
+// popup.js
+
+// 1. 初始化：回显数据
 document.addEventListener('DOMContentLoaded', () => {
-    chrome.storage.local.get(['userSkipTime'], (result) => {
-        // 如果之前存过，就用存的值；如果没存过，默认显示 90
-        const savedTime = result.userSkipTime || 90;
-        document.getElementById('skipTime').value = savedTime;
+    chrome.storage.local.get({
+        autoSkipEnable: false,
+        introTime: 90,
+        outroTime: 0,
+        manualSkipTime: 90,
+        minDuration: 300 // 新增：默认300秒(5分钟)以下的视频不触发自动跳过
+    }, (items) => {
+        document.getElementById('autoSkipEnable').checked = items.autoSkipEnable;
+        document.getElementById('introTime').value = items.introTime;
+        document.getElementById('outroTime').value = items.outroTime;
+        document.getElementById('manualSkipTime').value = items.manualSkipTime;
+        document.getElementById('minDuration').value = items.minDuration; // 回显
+        
+        updateStatusText(items.autoSkipEnable);
     });
 });
 
-// 2. 监听“保存”按钮的点击事件
-document.getElementById('saveBtn').addEventListener('click', () => {
-    const timeValue = document.getElementById('skipTime').value;
-    
-    // 把输入的值存入 Chrome 的本地存储
-    chrome.storage.local.set({ userSkipTime: parseInt(timeValue) }, () => {
-        // 保存成功后，显示一行小字提示
-        const status = document.getElementById('status');
-        status.textContent = '✅ 设置已保存！';
-        setTimeout(() => {
-            status.textContent = '';
-        }, 1500);
+// 2. 监听开关变化
+document.getElementById('autoSkipEnable').addEventListener('change', (e) => {
+    const isEnabled = e.target.checked;
+    chrome.storage.local.set({ autoSkipEnable: isEnabled }, () => {
+        updateStatusText(isEnabled);
+        showTempMessage(isEnabled ? '✅ 已开启自动跳过' : '🛑 已关闭自动跳过');
     });
 });
+
+// 3. 保存全部设置
+document.getElementById('saveBtn').addEventListener('click', () => {
+    const config = {
+        autoSkipEnable: document.getElementById('autoSkipEnable').checked, 
+        introTime: parseInt(document.getElementById('introTime').value) || 0,
+        outroTime: parseInt(document.getElementById('outroTime').value) || 0,
+        manualSkipTime: parseInt(document.getElementById('manualSkipTime').value) || 90,
+        minDuration: parseInt(document.getElementById('minDuration').value) || 0 // 保存新设置
+    };
+
+    chrome.storage.local.set(config, () => {
+        showTempMessage('✅ 所有设置已保存');
+    });
+});
+
+function updateStatusText(isEnabled) {
+    const statusDiv = document.getElementById('status');
+    if (!statusDiv.dataset.tempMessage) {
+        statusDiv.textContent = isEnabled ? '当前状态: 运行中 🟢' : '当前状态: 已停用 ⚫';
+        statusDiv.style.color = isEnabled ? 'green' : '#666';
+    }
+}
+
+function showTempMessage(msg) {
+    const statusDiv = document.getElementById('status');
+    statusDiv.dataset.tempMessage = 'true';
+    statusDiv.textContent = msg;
+    statusDiv.style.color = '#00aeec';
+    
+    setTimeout(() => {
+        delete statusDiv.dataset.tempMessage;
+        const isEnabled = document.getElementById('autoSkipEnable').checked;
+        updateStatusText(isEnabled);
+    }, 1500);
+}

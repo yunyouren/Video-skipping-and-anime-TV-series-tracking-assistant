@@ -11,15 +11,19 @@
   "permissions": [
     "storage"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_popup": "popup.html",
     "default_icon": "icon.png"
   },
-  "content_scripts": [
+"content_scripts": [
     {
-      "matches": ["*://*.bilibili.com/video/*", "*://*.bilibili.com/bangumi/play/*"],
+      "matches": ["<all_urls>"], 
       "js": ["content.js"],
-      "run_at": "document_end"
+      "run_at": "document_end",
+      "all_frames": true 
     }
   ]
 }
