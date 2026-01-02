@@ -60,29 +60,53 @@ document.getElementById('autoUpdateFav').addEventListener('change', (e) => {
     chrome.storage.local.set({ autoUpdateFav: e.target.checked });
 });
 
+
 // 按钮：添加当前视频
 document.getElementById('addFavBtn').addEventListener('click', () => {
     chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
         if (tabs.length === 0) return;
-        chrome.tabs.sendMessage(tabs[0].id, { action: "getRequestVideoInfo" }, (response) => {
-            if (chrome.runtime.lastError) {
-                console.error("通信错误:", chrome.runtime.lastError.message);
-                showTempMessage("请刷新视频页面!", "red");
-                return;
-            }
-            if (!response || !response.series) {
-                showTempMessage("未能识别信息", "red");
-                return;
-            }
-            // 存入 favorites
-            currentFavorites[response.series] = response;
-            chrome.storage.local.set({ favorites: currentFavorites }, () => {
-                renderFavoritesList();
-                showTempMessage("收藏成功 ✅");
+        const tabId = tabs[0].id;
+
+        // 步骤 1: 向主Frame (frameId: 0) 请求正确的标题
+        chrome.tabs.sendMessage(tabId, { action: "getNiceTitle" }, { frameId: 0 }, (titleResponse) => {
+            
+            // 步骤 2: 向所有Frame广播，寻找那个有视频的Frame
+            chrome.tabs.sendMessage(tabId, { action: "getRequestVideoInfo" }, (videoResponse) => {
+                
+                if (chrome.runtime.lastError) {
+                    // 忽略这里的错误，因为有些没有视频的frame会报错
+                }
+
+                if (!videoResponse) {
+                    showTempMessage("未找到播放中的视频", "red");
+                    return;
+                }
+
+                // --- 核心合并逻辑 ---
+                let finalData = videoResponse; // 默认用视频Frame的数据
+
+                // 如果主页面返回了标题，且视频Frame是在iframe里(标题可能是错的)
+                // 那么我们就用主页面的标题覆盖它！
+                if (titleResponse && titleResponse.series && titleResponse.series !== "樱花动漫") {
+                    console.log("使用主页面标题修正:", titleResponse.series);
+                    finalData.series = titleResponse.series;
+                    // 如果集数没解析出来，也尝试用主页面的url/标题补充
+                    if (finalData.episode === "观看中" && titleResponse.episode) {
+                        finalData.episode = titleResponse.episode;
+                    }
+                }
+
+                // 保存
+                currentFavorites[finalData.series] = finalData;
+                chrome.storage.local.set({ favorites: currentFavorites }, () => {
+                    renderFavoritesList();
+                    showTempMessage("收藏成功 ✅");
+                });
             });
         });
     });
 });
+
 
 function renderFavoritesList() {
     const listDiv = document.getElementById('favList');

@@ -1,5 +1,5 @@
 // =========================================================
-// Bilibili Skipper Ultimate (Title & URL Match)
+// Bilibili Skipper Ultimate (Iframe Fix)
 // =========================================================
 
 if (window.hasBiliSkipperLoaded) {
@@ -14,7 +14,6 @@ let config = {
     enableOutro: true,
     autoRestart: false,
     autoUpdateFav: true,
-
     introTime: 90,
     outroTime: 0,
     manualSkipTime: 90,
@@ -28,14 +27,33 @@ let config = {
 
 let isSwitchingEpisode = false;
 
-// --- 消息监听 ---
+// --- 消息监听 (核心修改) ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    
+    // 指令1: 仅获取页面标题 (用于主Frame)
+    if (request.action === "getNiceTitle") {
+        const info = parseVideoInfo(); // 尝试解析
+        sendResponse({
+            series: info.seriesName,
+            episode: info.episodeName,
+            url: window.location.href
+        });
+        return true;
+    }
+
+    // 指令2: 获取视频进度 (用于播放器Frame)
     if (request.action === "getRequestVideoInfo") {
         const video = findMainVideo();
+        // 如果当前Frame没有视频，直接忽略，不返回任何东西
+        // 这样Popup就不会收到错误的"无视频"响应
         if (!video) return; 
+
         try {
+            // 尽力解析一下当前Frame的标题(可能是错误的)
             const info = parseVideoInfo();
             const data = {
+                // 标记一下：如果是播放器iframe，标题往往很短或者包含"播放器"
+                isIframe: (window.self !== window.top),
                 series: info.seriesName, 
                 episode: info.episodeName,     
                 site: info.siteName,
@@ -47,7 +65,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             sendResponse(data);
         } catch (e) {
             console.error("Skipper: 解析出错", e);
-            sendResponse({ error: "parse_error" });
         }
     }
     return true; 
@@ -61,8 +78,6 @@ chrome.storage.local.get(config, (items) => {
     if (!config.keyRewind || !config.keyRewind.code) config.keyRewind = { code: 'ArrowLeft', shift: true, ctrl: false, alt: false };
 
     checkAndApplyAutoMatch();
-
-    // 捕获模式监听按键
     window.addEventListener('keydown', onKeyHandler, true);
     if (!window.biliMonitorInterval) startMonitoring();
 });
@@ -75,30 +90,22 @@ chrome.storage.onChanged.addListener((changes) => {
     }
 });
 
-// --- 【核心修改】自动匹配逻辑 (支持标题和URL) ---
 function checkAndApplyAutoMatch() {
     if (!config.savedPresets || config.savedPresets.length === 0) return;
-    
     const currentUrl = window.location.href;
-    const currentTitle = document.title; // 获取当前网页标题
-
-    // 查找匹配项：检查 URL 或 标题 是否包含预设的关键词
+    const currentTitle = document.title; 
     const matchedPreset = config.savedPresets.find(p => {
         if (!p.domain || p.domain.trim() === "") return false;
         const keyword = p.domain.trim();
         return currentUrl.includes(keyword) || currentTitle.includes(keyword);
     });
-
     if (matchedPreset) {
-        console.log("Skipper: 自动匹配预设 ->", matchedPreset.name);
         config.introTime = matchedPreset.intro;
         config.outroTime = matchedPreset.outro;
         config.autoRestart = matchedPreset.restart;
         config.autoPlayNext = matchedPreset.next;
         config.enableIntro = (matchedPreset.intro > 0);
         config.enableOutro = (matchedPreset.outro > 0);
-        // 可选：提示用户
-        // setTimeout(() => { showToast(`🤖 已加载配置: ${matchedPreset.name}`); }, 1000);
     }
 }
 
@@ -122,7 +129,6 @@ function isKeyMatch(event, keyConfig) {
     if (keyConfig.code === 'ArrowRight' && (code === 'ArrowRight' || event.key === 'ArrowRight')) {}
     else if (keyConfig.code === 'ArrowLeft' && (code === 'ArrowLeft' || event.key === 'ArrowLeft')) {}
     else if (code !== keyConfig.code) return false;
-
     if (event.shiftKey !== (keyConfig.shift || false)) return false;
     if (event.ctrlKey !== (keyConfig.ctrl || false)) return false;
     if (event.altKey !== (keyConfig.alt || false)) return false;
@@ -133,7 +139,8 @@ function tryClickNext() {
     const selectors = [
         '.bpx-player-ctrl-next', '.squirtle-video-next', 
         '.bilibili-player-video-btn-next', '[aria-label="下一个"]', 
-        '.switch-btn.next', '#multi_page .cur + li a'
+        '.switch-btn.next', '#multi_page .cur + li a',
+        '.nxt', '.next' 
     ];
     for (const sel of selectors) {
         const btn = document.querySelector(sel);
@@ -152,7 +159,6 @@ function onKeyHandler(event) {
     const video = findMainVideo();
     if (!video) return;
     const skipTime = config.manualSkipTime || 90;
-
     if (isForward) {
         video.currentTime += skipTime;
         showToast(`>>> 快进 ${skipTime} 秒`);
@@ -165,67 +171,73 @@ function onKeyHandler(event) {
     event.stopImmediatePropagation();
 }
 
+// --- 智能信息提取 (针对樱花动漫优化) ---
 function parseVideoInfo() {
-    const rawTitle = document.title.trim();
+    let rawTitle = document.title.trim();
     const url = window.location.href;
+    
+    // 尝试寻找 H1 标签 (樱花动漫通常在 H1 里写了真名)
+    // 即使在 iframe 里找不到，如果是主Frame调用这个函数就能找到了
+    const h1 = document.querySelector('h1');
+    if (h1 && h1.innerText.length > 2) {
+        // 如果 H1 看起来像个标题，优先使用 H1
+        rawTitle = h1.innerText.trim() + " " + rawTitle; 
+    }
+
     let seriesName = "";
     let episodeName = "";
     let siteName = "Web";
 
-    if (url.includes("bilibili.com")) {
-        siteName = "B站";
-        const mediaTitleEl = document.querySelector('.media-title, .media-info-title, .bangumi-title');
-        const podTitleEl = document.querySelector('.video-pod-title, .up-info-container .title');
-        if (mediaTitleEl) {
-            seriesName = mediaTitleEl.innerText.trim();
-        } else if (podTitleEl) {
-            seriesName = podTitleEl.innerText.trim();
-        }
-    } else if (url.includes("iqiyi")) {
-        siteName = "爱奇艺";
-    }
+    if (url.includes("bilibili.com")) siteName = "B站";
+    else if (url.includes("iqiyi")) siteName = "爱奇艺";
+    else if (url.includes("yinghuacd") || rawTitle.includes("樱花")) siteName = "樱花";
 
-    if (!seriesName) {
-        let cleanTitle = rawTitle
-            .replace(/_bilibili.*/i, "")
-            .replace(/-bilibili.*/i, "")
-            .replace(/_哔哩哔哩.*/i, "")
-            .replace(/-哔哩哔哩.*/i, "")
-            .replace(/-国创.*/i, "")
-            .replace(/-番剧.*/i, "")
-            .replace(/-全集.*/i, "")
-            .replace(/-高清.*/i, "")
-            .replace(/在线观看.*/i, "")
-            .trim();
-        const matchEpisode = cleanTitle.match(/(.*?)[\s-]*(第\s*\d+\s*[集话]|Ep\.?\s*\d+|Vol\.\d+)/i);
-        if (matchEpisode) {
-            seriesName = matchEpisode[1].trim();
-            episodeName = matchEpisode[2].trim();
-        } else {
-            const parts = cleanTitle.split('_');
-            if (parts.length >= 2) {
-                seriesName = parts[1].trim();
-                episodeName = parts[0].trim();
+    let cleanTitle = rawTitle
+        .replace(/_bilibili.*/i, "")
+        .replace(/-bilibili.*/i, "")
+        .replace(/-国创.*/i, "")
+        .replace(/-番剧.*/i, "")
+        .replace(/-全集.*/i, "")
+        .replace(/在线观看.*/i, "")
+        .replace(/_在线观看.*/i, "")
+        .replace(/_高清.*/i, "")
+        .replace(/_NT动漫.*/i, "")
+        .replace(/樱花动漫.*/i, "") // 去掉樱花后缀
+        .replace(/播放器.*/i, "")   // 去掉播放器字样
+        .trim();
+
+    cleanTitle = cleanTitle.replace(/[《》]/g, "");
+
+    const matchEpisode = cleanTitle.match(/(.*?)[\s-]*(第\s*\d+\s*[集话]|Ep\.?\s*\d+|Vol\.\d+)/i);
+    
+    if (matchEpisode) {
+        seriesName = matchEpisode[1].trim(); 
+        episodeName = matchEpisode[2].trim(); 
+    } else {
+        const parts = cleanTitle.split(/_| /); 
+        if (parts.length >= 2) {
+            const lastPart = parts[parts.length - 1];
+            if (/^\d+$/.test(lastPart) || lastPart.length < 5) {
+                episodeName = lastPart;
+                seriesName = cleanTitle.replace(lastPart, "").trim();
+                seriesName = seriesName.replace(/[_-]$/, "");
             } else {
                 seriesName = cleanTitle;
             }
+        } else {
+            seriesName = cleanTitle;
         }
     }
 
     if (!episodeName) {
         const epMatch = rawTitle.match(/(第\s*\d+\s*[集话]|Ep\.?\s*\d+)/i);
-        if (epMatch) {
-            episodeName = epMatch[0];
-        } else {
-            const pMatch = url.match(/p=(\d+)/);
-            if (pMatch) {
-                episodeName = `P${pMatch[1]}`;
-            } else {
-                episodeName = "观看中";
-            }
-        }
+        if (epMatch) episodeName = epMatch[0];
+        else episodeName = "观看中";
     }
+    
     seriesName = seriesName.replace(/(第\s*\d+\s*[集话]).*/, "").trim();
+    if (seriesName.length === 0) seriesName = "未知番剧";
+
     return { seriesName, episodeName, siteName };
 }
 
@@ -250,9 +262,6 @@ function startMonitoring() {
                 videoLoadStartTime = Date.now(); 
                 restartCooldownTime = 0; 
                 lastFavUpdateTime = 0; 
-                
-                // 页面跳转/换集时，重新检查一次是否匹配新预设
-                // 因为 B站 是单页应用，换集不会刷新页面
                 setTimeout(checkAndApplyAutoMatch, 1000);
             };
             video.addEventListener('loadedmetadata', resetState);
@@ -273,6 +282,16 @@ function autoUpdateFavorites(video) {
     if (now - lastFavUpdateTime < 10000) return;
     if (video.currentTime < 10) return;
 
+    // 自动更新时，因为没法跨Frame询问标题，所以这里有个局限：
+    // 如果你在iframe里自动更新，可能还是会更新成"播放器"这个名字
+    // **但是**，我们的逻辑是：必须 Favorites 里已经有这个 Key 才会更新。
+    // 如果你第一次手动收藏是正确的名字，那么 Key 就是正确的名字。
+    // 这里我们只要能匹配上 Key 就能更新。
+    // 
+    // 难点：iframe 里解析出来的 seriesName 可能是 "播放器"，跟 Favorites 里的 "海贼王" 对不上。
+    // 解决：自动更新功能在 iframe 网站上可能受限，这是技术硬伤。
+    // 补救：只有当 seriesName 在收藏里存在时才更新。如果 iframe 解析出来是乱码，就不会误更新。
+    
     try {
         const info = parseVideoInfo();
         const sName = info.seriesName;
@@ -295,7 +314,6 @@ function autoUpdateFavorites(video) {
 
 function handleTimeUpdate(e) {
     const video = e.target;
-    
     autoUpdateFavorites(video);
 
     if (config.autoSkipEnable !== true) return;
@@ -308,7 +326,6 @@ function handleTimeUpdate(e) {
                 const outroTriggerTime = video.duration - (config.enableOutro ? config.outroTime : 0);
                 let targetPos = config.enableIntro ? config.introTime : 0;
                 if (targetPos >= outroTriggerTime) { targetPos = 0; }
-                
                 video.currentTime = targetPos;
                 showToast(`↺ 已重置到 ${targetPos}秒`);
                 hasTriggeredRestart = true;
