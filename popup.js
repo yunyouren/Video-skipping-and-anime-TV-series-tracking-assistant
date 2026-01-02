@@ -22,10 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
         enableIntro: true,
         enableOutro: true,
         autoRestart: false,
-        
-        // 新增：自动更新收藏开关
-        autoUpdateFav: true, 
-
+        autoUpdateFav: true,
         introTime: 90,
         outroTime: 0,
         manualSkipTime: 90,
@@ -39,74 +36,75 @@ document.addEventListener('DOMContentLoaded', () => {
         loadConfigToUI(items);
         currentPresets = items.savedPresets;
         currentFavorites = items.favorites;
-        
-        // 回显新开关
         document.getElementById('autoUpdateFav').checked = items.autoUpdateFav;
-
         renderPresetDropdown();
         renderFavoritesList();
-        
         tempKeyForward = items.keyForward;
         tempKeyRewind = items.keyRewind;
         updateStatusText(items.autoSkipEnable);
     });
-
     setupKeyRecorder('keyForward', (keyData) => { tempKeyForward = keyData; });
     setupKeyRecorder('keyRewind', (keyData) => { tempKeyRewind = keyData; });
 });
 
-// --- 监听新开关 (即时保存) ---
 document.getElementById('autoUpdateFav').addEventListener('change', (e) => {
     chrome.storage.local.set({ autoUpdateFav: e.target.checked });
 });
 
-
-// 按钮：添加当前视频
+// --- ⭐ 核心修改：收藏按钮 ---
 document.getElementById('addFavBtn').addEventListener('click', () => {
     chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
         if (tabs.length === 0) return;
-        const tabId = tabs[0].id;
-
-        // 步骤 1: 向主Frame (frameId: 0) 请求正确的标题
-        chrome.tabs.sendMessage(tabId, { action: "getNiceTitle" }, { frameId: 0 }, (titleResponse) => {
-            
-            // 步骤 2: 向所有Frame广播，寻找那个有视频的Frame
-            chrome.tabs.sendMessage(tabId, { action: "getRequestVideoInfo" }, (videoResponse) => {
+        
+        chrome.tabs.sendMessage(tabs[0].id, { action: "getNiceTitle" }, { frameId: 0 }, (titleResponse) => {
+            chrome.tabs.sendMessage(tabs[0].id, { action: "getRequestVideoInfo" }, (videoResponse) => {
                 
-                if (chrome.runtime.lastError) {
-                    // 忽略这里的错误，因为有些没有视频的frame会报错
-                }
+                if (chrome.runtime.lastError) { /* 忽略 */ }
 
                 if (!videoResponse) {
-                    showTempMessage("未找到播放中的视频", "red");
+                    showFloatingToast("❌ 失败：未检测到视频"); // 使用新弹窗
                     return;
                 }
 
-                // --- 核心合并逻辑 ---
-                let finalData = videoResponse; // 默认用视频Frame的数据
-
-                // 如果主页面返回了标题，且视频Frame是在iframe里(标题可能是错的)
-                // 那么我们就用主页面的标题覆盖它！
+                let finalData = videoResponse;
                 if (titleResponse && titleResponse.series && titleResponse.series !== "樱花动漫") {
                     console.log("使用主页面标题修正:", titleResponse.series);
                     finalData.series = titleResponse.series;
-                    // 如果集数没解析出来，也尝试用主页面的url/标题补充
                     if (finalData.episode === "观看中" && titleResponse.episode) {
                         finalData.episode = titleResponse.episode;
                     }
                 }
 
-                // 保存
                 currentFavorites[finalData.series] = finalData;
                 chrome.storage.local.set({ favorites: currentFavorites }, () => {
                     renderFavoritesList();
-                    showTempMessage("收藏成功 ✅");
+                    // 使用新弹窗
+                    showFloatingToast(`✅ 已收藏！\n${finalData.series}\n${finalData.episode}`);
                 });
             });
         });
     });
 });
 
+// --- ⭐ 新增：漂浮弹窗函数 ---
+function showFloatingToast(msg) {
+    let toast = document.getElementById('my-toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'my-toast';
+        toast.className = 'toast-popup'; // 对应 CSS 类
+        document.body.appendChild(toast);
+    }
+    toast.innerText = msg;
+    toast.classList.add('show');
+    
+    // 2秒后自动消失
+    setTimeout(() => {
+        toast.classList.remove('show');
+    }, 2000);
+}
+
+// ... (以下函数保持不变) ...
 
 function renderFavoritesList() {
     const listDiv = document.getElementById('favList');
@@ -152,7 +150,7 @@ function renderFavoritesList() {
 function renderPresetDropdown() {
     const select = document.getElementById('presetSelect');
     const selectedValue = select.value;
-    select.innerHTML = '<option value="">-- 选择或新建 --</option>';
+    select.innerHTML = '<option value="">-- 预设方案 --</option>';
     currentPresets.forEach((preset, index) => {
         const option = document.createElement('option');
         option.value = index;
@@ -265,10 +263,7 @@ document.getElementById('saveBtn').addEventListener('click', () => {
         minDuration: parseInt(document.getElementById('minDuration').value) || 0,
         keyForward: tempKeyForward || defaultKeys.forward,
         keyRewind: tempKeyRewind || defaultKeys.rewind,
-        
-        // 记得保存新开关
         autoUpdateFav: document.getElementById('autoUpdateFav').checked,
-
         savedPresets: currentPresets,
         favorites: currentFavorites
     };
