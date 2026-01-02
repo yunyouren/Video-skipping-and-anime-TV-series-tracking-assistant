@@ -14,7 +14,7 @@ const defaultPresets = [
 let tempKeyForward = null;
 let tempKeyRewind = null;
 let currentPresets = [];
-let currentFavorites = {}; // 收藏数据
+let currentFavorites = {};
 
 document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.local.get({
@@ -22,6 +22,10 @@ document.addEventListener('DOMContentLoaded', () => {
         enableIntro: true,
         enableOutro: true,
         autoRestart: false,
+        
+        // 新增：自动更新收藏开关
+        autoUpdateFav: true, 
+
         introTime: 90,
         outroTime: 0,
         manualSkipTime: 90,
@@ -30,16 +34,17 @@ document.addEventListener('DOMContentLoaded', () => {
         keyForward: defaultKeys.forward,
         keyRewind: defaultKeys.rewind,
         savedPresets: defaultPresets,
-        
-        // 变更为 favorites
         favorites: {} 
     }, (items) => {
         loadConfigToUI(items);
         currentPresets = items.savedPresets;
-        currentFavorites = items.favorites; // 加载收藏
+        currentFavorites = items.favorites;
         
+        // 回显新开关
+        document.getElementById('autoUpdateFav').checked = items.autoUpdateFav;
+
         renderPresetDropdown();
-        renderFavoritesList(); // 渲染收藏列表
+        renderFavoritesList();
         
         tempKeyForward = items.keyForward;
         tempKeyRewind = items.keyRewind;
@@ -50,38 +55,26 @@ document.addEventListener('DOMContentLoaded', () => {
     setupKeyRecorder('keyRewind', (keyData) => { tempKeyRewind = keyData; });
 });
 
-// --- ⭐ 收藏功能核心 ---
+// --- 监听新开关 (即时保存) ---
+document.getElementById('autoUpdateFav').addEventListener('change', (e) => {
+    chrome.storage.local.set({ autoUpdateFav: e.target.checked });
+});
 
 // 按钮：添加当前视频
 document.getElementById('addFavBtn').addEventListener('click', () => {
     chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
         if (tabs.length === 0) return;
-        
-        // 发送消息
         chrome.tabs.sendMessage(tabs[0].id, { action: "getRequestVideoInfo" }, (response) => {
-            
-            // 1. 检查通信错误 (比如脚本没注入，或者页面刷新了但插件没重新加载)
             if (chrome.runtime.lastError) {
                 console.error("通信错误:", chrome.runtime.lastError.message);
                 showTempMessage("请刷新视频页面!", "red");
                 return;
             }
-
-            // 2. 检查逻辑错误
-            if (!response) {
-                showTempMessage("未收到响应", "red");
+            if (!response || !response.series) {
+                showTempMessage("未能识别信息", "red");
                 return;
             }
-            if (response.error === "no_video") {
-                showTempMessage("页面没有检测到视频", "red");
-                return;
-            }
-            if (!response.series) {
-                showTempMessage("标题解析失败", "red");
-                return;
-            }
-
-            // 3. 正常保存
+            // 存入 favorites
             currentFavorites[response.series] = response;
             chrome.storage.local.set({ favorites: currentFavorites }, () => {
                 renderFavoritesList();
@@ -97,21 +90,17 @@ function renderFavoritesList() {
         listDiv.innerHTML = '<div style="padding:15px; text-align:center; color:#999; font-size:12px;">暂无收藏</div>';
         return;
     }
-
     listDiv.innerHTML = '';
-    // 按时间倒序排列 (最近收藏/观看的在上面)
     const sortedItems = Object.values(currentFavorites).sort((a, b) => b.timestamp - a.timestamp);
     const formatTime = (seconds) => {
         const m = Math.floor(seconds / 60).toString().padStart(2, '0');
         const s = Math.floor(seconds % 60).toString().padStart(2, '0');
         return `${m}:${s}`;
     };
-
     sortedItems.forEach(item => {
         const div = document.createElement('div');
         div.className = 'fav-item';
         div.title = "点击跳转续看";
-        
         div.innerHTML = `
             <div class="fav-series">${item.series}</div>
             <div class="fav-episode">
@@ -120,30 +109,21 @@ function renderFavoritesList() {
             </div>
             <div class="fav-del" title="删除">×</div>
         `;
-        
-        // 点击跳转
         div.addEventListener('click', (e) => {
-            // 如果点的是删除按钮，不跳转
             if (e.target.classList.contains('fav-del')) return;
             chrome.tabs.create({ url: item.url });
         });
-
-        // 点击删除
         div.querySelector('.fav-del').addEventListener('click', (e) => {
             e.stopPropagation();
-            if (confirm(`不再追 "${item.series}" 了吗?`)) {
+            if (confirm(`删除 "${item.series}"?`)) {
                 delete currentFavorites[item.series];
                 chrome.storage.local.set({ favorites: currentFavorites });
                 renderFavoritesList();
             }
         });
-        
         listDiv.appendChild(div);
     });
 }
-
-
-// ... (以下代码保持不变：预设管理、通用逻辑等) ...
 
 function renderPresetDropdown() {
     const select = document.getElementById('presetSelect');
@@ -158,14 +138,12 @@ function renderPresetDropdown() {
     });
     if(selectedValue && currentPresets[selectedValue]) select.value = selectedValue;
 }
-
 document.getElementById('presetSelect').addEventListener('change', (e) => {
     const index = e.target.value;
     const domainInput = document.getElementById('domainMatch');
     if (index !== "") domainInput.value = currentPresets[index].domain || "";
     else domainInput.value = "";
 });
-
 document.getElementById('applyPresetBtn').addEventListener('click', () => {
     const index = document.getElementById('presetSelect').value;
     if (index === "") return showTempMessage("请先选择预设", "red");
@@ -174,7 +152,6 @@ document.getElementById('applyPresetBtn').addEventListener('click', () => {
     document.getElementById('saveBtn').click();
     showTempMessage(`已加载: ${p.name}`);
 });
-
 document.getElementById('addPresetBtn').addEventListener('click', () => {
     const index = document.getElementById('presetSelect').value;
     const domain = document.getElementById('domainMatch').value.trim();
@@ -191,7 +168,6 @@ document.getElementById('addPresetBtn').addEventListener('click', () => {
     renderPresetDropdown();
     showTempMessage("已保存 ✅");
 });
-
 document.getElementById('delPresetBtn').addEventListener('click', () => {
     const index = document.getElementById('presetSelect').value;
     if (index === "") return;
@@ -212,7 +188,6 @@ function createPresetFromUI(name, domain) {
         next: document.getElementById('autoPlayNext').checked,
     };
 }
-
 function loadPresetToUI(p) {
     document.getElementById('introTime').value = p.intro;
     document.getElementById('outroTime').value = p.outro;
@@ -222,9 +197,7 @@ function loadPresetToUI(p) {
     document.getElementById('enableOutro').checked = (p.outro > 0);
     document.getElementById('domainMatch').value = p.domain || "";
 }
-
 function savePresetsToStorage() { chrome.storage.local.set({ savedPresets: currentPresets }); }
-
 function loadConfigToUI(items) {
     document.getElementById('autoSkipEnable').checked = items.autoSkipEnable;
     document.getElementById('enableIntro').checked = items.enableIntro;
@@ -238,7 +211,6 @@ function loadConfigToUI(items) {
     document.getElementById('keyForward').value = items.keyForward.keyName;
     document.getElementById('keyRewind').value = items.keyRewind.keyName;
 }
-
 function setupKeyRecorder(elementId, saveCallback) {
     const input = document.getElementById(elementId);
     input.addEventListener('keydown', (e) => {
@@ -256,7 +228,6 @@ function setupKeyRecorder(elementId, saveCallback) {
         saveCallback({ code: e.code, shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey, keyName: input.value });
     });
 }
-
 document.getElementById('saveBtn').addEventListener('click', () => {
     const config = {
         autoSkipEnable: document.getElementById('autoSkipEnable').checked,
@@ -270,12 +241,15 @@ document.getElementById('saveBtn').addEventListener('click', () => {
         minDuration: parseInt(document.getElementById('minDuration').value) || 0,
         keyForward: tempKeyForward || defaultKeys.forward,
         keyRewind: tempKeyRewind || defaultKeys.rewind,
+        
+        // 记得保存新开关
+        autoUpdateFav: document.getElementById('autoUpdateFav').checked,
+
         savedPresets: currentPresets,
-        favorites: currentFavorites // 保存收藏
+        favorites: currentFavorites
     };
     chrome.storage.local.set(config, () => { showTempMessage('✅ 配置已保存'); });
 });
-
 const switches = ['autoSkipEnable', 'enableIntro', 'enableOutro', 'autoRestart', 'autoPlayNext'];
 switches.forEach(id => {
     document.getElementById(id).addEventListener('change', (e) => {
@@ -283,7 +257,6 @@ switches.forEach(id => {
         chrome.storage.local.set(data, () => { if(id === 'autoSkipEnable') updateStatusText(e.target.checked); });
     });
 });
-
 function updateStatusText(isEnabled) {
     const statusDiv = document.getElementById('status');
     if (!statusDiv.dataset.tempMessage) {
