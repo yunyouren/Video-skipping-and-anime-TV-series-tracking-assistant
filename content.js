@@ -1,5 +1,5 @@
 // =========================================================
-// Bilibili Skipper Ultimate (Auto Restart from Content)
+// Bilibili Skipper Ultimate (Safe Landing Fix)
 // =========================================================
 
 if (window.hasBiliSkipperLoaded) {
@@ -12,7 +12,7 @@ let config = {
     autoSkipEnable: false,
     enableIntro: true,
     enableOutro: true,
-    autoRestart: false, // 新增
+    autoRestart: false,
     introTime: 90,
     outroTime: 0,
     manualSkipTime: 90,
@@ -103,7 +103,9 @@ function onKeyHandler(event) {
 
 // --- 自动监控逻辑 ---
 let hasSkippedIntro = false;
-let hasCheckedRestart = false; // 新增：标记是否已经检查过“完播重置”
+let hasTriggeredRestart = false; 
+let videoLoadStartTime = 0;      
+let restartCooldownTime = 0; // 新增：重置后的冷却时间戳
 
 function startMonitoring() {
     window.biliMonitorInterval = setInterval(() => {
@@ -113,17 +115,22 @@ function startMonitoring() {
         if (!video.dataset.hasSkipperListener) {
             video.addEventListener('timeupdate', handleTimeUpdate);
             
-            // 当视频源改变（换集）时，重置所有状态标记
             const resetState = () => { 
                 hasSkippedIntro = false; 
                 isSwitchingEpisode = false; 
-                hasCheckedRestart = false; // 换集后允许再次检查重置
+                hasTriggeredRestart = false; 
+                videoLoadStartTime = Date.now(); 
+                restartCooldownTime = 0; // 重置冷却
             };
             
             video.addEventListener('loadedmetadata', resetState);
             video.addEventListener('durationchange', resetState); 
-            video.addEventListener('seeking', () => { if(video.currentTime < 1) hasSkippedIntro = false; });
+            video.addEventListener('emptied', resetState);
+            video.addEventListener('seeking', () => { 
+                if(video.currentTime < 1) hasSkippedIntro = false; 
+            });
             
+            videoLoadStartTime = Date.now();
             video.dataset.hasSkipperListener = 'true';
         }
     }, 1000);
@@ -132,50 +139,76 @@ function startMonitoring() {
 function handleTimeUpdate(e) {
     const video = e.target;
     
-    // 1. 总开关检查
+    // 1. 总开关
     if (config.autoSkipEnable !== true) return;
     
-    // 2. 短视频保护 (不适用于“完播重置”，因为短视频也可能需要重看)
-    // 但为了逻辑统一，且防止误伤几秒钟的广告，还是保留最小长度检查
-    // 如果你希望短视频也生效，可以将下面的 minDuration 换成一个较小的固定值(如10)
+    // 2. 短视频保护
     if (video.duration < config.minDuration) return; 
 
-    // --- 新增：完播重置逻辑 ---
-    // 只有在视频刚开始加载，且开启了功能，且没检查过时才运行
-    if (config.autoRestart === true && !hasCheckedRestart) {
-        // 定义“处于片尾”：剩余时间少于30秒，或者进度超过98%
-        const timeLeft = video.duration - video.currentTime;
-        const progress = video.currentTime / video.duration;
-
-        if (timeLeft < 30 || progress > 0.98) {
-            console.log("检测到视频处于片尾，执行重置...");
-            // 重置到片头结束的位置 (如果没有设置片头，就是0)
-            video.currentTime = config.enableIntro ? config.introTime : 0;
-            showToast('↺ 视频已播完，重置到正片开始');
+    // --- 【逻辑 A】完播重置 (Safe Landing) ---
+    if (config.autoRestart === true && !hasTriggeredRestart) {
+        // 在视频加载前4秒内持续检测
+        if (Date.now() - videoLoadStartTime < 4000) {
+            const timeLeft = video.duration - video.currentTime;
             
-            // 如果重置的位置就是开头，也要标记已跳过片头，防止重复触发
-            hasSkippedIntro = true; 
+            // 如果处于片尾
+            if (timeLeft < 30 || video.currentTime / video.duration > 0.95) {
+                console.log("Skipper: 触发完播重置...");
+
+                // >>> 安全计算核心 <<<
+                // 1. 计算片尾触发线
+                const outroTriggerTime = video.duration - (config.enableOutro ? config.outroTime : 0);
+                // 2. 计算理想的重置位置 (片头结束处)
+                let targetPos = config.enableIntro ? config.introTime : 0;
+
+                // 3. 碰撞检测：如果 理想位置 >= 片尾触发线，说明会撞车
+                if (targetPos >= outroTriggerTime) {
+                    console.log("Skipper: 片头片尾重叠，强制重置到 0秒");
+                    targetPos = 0; // 强制降落到 0秒
+                }
+
+                video.currentTime = targetPos;
+                showToast(`↺ 已重置到 ${targetPos}秒`);
+                
+                // 标记状态
+                hasTriggeredRestart = true;
+                hasSkippedIntro = true;
+                // 设置5秒的无敌时间：这5秒内禁止检测片尾，防止B站进度条回弹误判
+                restartCooldownTime = Date.now() + 5000; 
+            }
         }
-        // 标记为已检查，无论是否触发重置，本集都不再检查
-        hasCheckedRestart = true;
     }
 
-    if (video.duration < (config.introTime + 5)) return;
+    // --- 【逻辑 B】跳过片头 ---
+    const outroTriggerTime = video.duration - (config.enableOutro ? config.outroTime : 0);
+    const targetIntroTime = config.introTime;
+    const isOverlap = targetIntroTime >= outroTriggerTime;
 
-    // --- 跳过片头 ---
-    if (config.enableIntro === true) {
-        if (video.currentTime < config.introTime && !hasSkippedIntro && video.currentTime > 0.5) {
-            video.currentTime = config.introTime;
-            hasSkippedIntro = true;
-            showToast(`🚀 跳过片头`);
+    if (config.enableIntro === true && !isOverlap) { 
+        if (video.currentTime < targetIntroTime && !hasSkippedIntro && video.currentTime > 0.5) {
+             // 如果在无敌时间内，不要乱动（虽然这里通常是跳去同一个地方，但为了稳定）
+             if (Date.now() < restartCooldownTime) {
+                 // 仅仅标记为已跳过，不做动作
+                 hasSkippedIntro = true; 
+             } else if (targetIntroTime < video.duration) {
+                video.currentTime = targetIntroTime;
+                hasSkippedIntro = true;
+                showToast(`🚀 跳过片头`);
+            }
         }
     }
 
-    // --- 跳过片尾 ---
+    // --- 【逻辑 C】跳过片尾 ---
     if (config.enableOutro === true) {
+        // 如果当前处于“重置后的无敌时间”内，直接跳过片尾检测！
+        // 这就是解决“直接下一集”的关键
+        if (Date.now() < restartCooldownTime) return;
+
         if (config.outroTime > 0) {
-            const triggerTime = video.duration - config.outroTime;
-            if (video.currentTime > triggerTime && video.currentTime < video.duration) {
+            if (video.currentTime > outroTriggerTime && video.currentTime < video.duration) {
+                // 加载保护：刚加载页面的4秒内如果不重置，也不跳片尾
+                if (Date.now() - videoLoadStartTime < 4000 && !hasTriggeredRestart) return;
+
                 if (isSwitchingEpisode) return;
 
                 if (config.autoPlayNext === true) {
