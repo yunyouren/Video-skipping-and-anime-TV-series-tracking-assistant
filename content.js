@@ -1,5 +1,5 @@
 // =========================================================
-// Bilibili Skipper Ultimate (With Toggle Switches)
+// Bilibili Skipper Ultimate (Auto Restart from Content)
 // =========================================================
 
 if (window.hasBiliSkipperLoaded) {
@@ -10,8 +10,9 @@ window.hasBiliSkipperLoaded = true;
 // --- 全局配置 ---
 let config = {
     autoSkipEnable: false,
-    enableIntro: true,   // 新增
-    enableOutro: true,   // 新增
+    enableIntro: true,
+    enableOutro: true,
+    autoRestart: false, // 新增
     introTime: 90,
     outroTime: 0,
     manualSkipTime: 90,
@@ -83,12 +84,10 @@ chrome.storage.onChanged.addListener((changes) => {
 function onKeyHandler(event) {
     const isForward = isKeyMatch(event, config.keyForward);
     const isRewind = isKeyMatch(event, config.keyRewind);
-
     if (!isForward && !isRewind) return;
 
     const video = findMainVideo();
     if (!video) return;
-
     const skipTime = config.manualSkipTime;
 
     if (isForward) {
@@ -98,13 +97,13 @@ function onKeyHandler(event) {
         video.currentTime -= skipTime;
         showToast(`<<< 快退 ${skipTime} 秒`);
     }
-    
     event.preventDefault();
     event.stopPropagation();
 }
 
 // --- 自动监控逻辑 ---
 let hasSkippedIntro = false;
+let hasCheckedRestart = false; // 新增：标记是否已经检查过“完播重置”
 
 function startMonitoring() {
     window.biliMonitorInterval = setInterval(() => {
@@ -113,10 +112,18 @@ function startMonitoring() {
 
         if (!video.dataset.hasSkipperListener) {
             video.addEventListener('timeupdate', handleTimeUpdate);
-            const resetState = () => { hasSkippedIntro = false; isSwitchingEpisode = false; };
+            
+            // 当视频源改变（换集）时，重置所有状态标记
+            const resetState = () => { 
+                hasSkippedIntro = false; 
+                isSwitchingEpisode = false; 
+                hasCheckedRestart = false; // 换集后允许再次检查重置
+            };
+            
             video.addEventListener('loadedmetadata', resetState);
             video.addEventListener('durationchange', resetState); 
             video.addEventListener('seeking', () => { if(video.currentTime < 1) hasSkippedIntro = false; });
+            
             video.dataset.hasSkipperListener = 'true';
         }
     }, 1000);
@@ -128,11 +135,34 @@ function handleTimeUpdate(e) {
     // 1. 总开关检查
     if (config.autoSkipEnable !== true) return;
     
-    // 2. 短视频保护
-    if (video.duration < config.minDuration) return;
+    // 2. 短视频保护 (不适用于“完播重置”，因为短视频也可能需要重看)
+    // 但为了逻辑统一，且防止误伤几秒钟的广告，还是保留最小长度检查
+    // 如果你希望短视频也生效，可以将下面的 minDuration 换成一个较小的固定值(如10)
+    if (video.duration < config.minDuration) return; 
+
+    // --- 新增：完播重置逻辑 ---
+    // 只有在视频刚开始加载，且开启了功能，且没检查过时才运行
+    if (config.autoRestart === true && !hasCheckedRestart) {
+        // 定义“处于片尾”：剩余时间少于30秒，或者进度超过98%
+        const timeLeft = video.duration - video.currentTime;
+        const progress = video.currentTime / video.duration;
+
+        if (timeLeft < 30 || progress > 0.98) {
+            console.log("检测到视频处于片尾，执行重置...");
+            // 重置到片头结束的位置 (如果没有设置片头，就是0)
+            video.currentTime = config.enableIntro ? config.introTime : 0;
+            showToast('↺ 视频已播完，重置到正片开始');
+            
+            // 如果重置的位置就是开头，也要标记已跳过片头，防止重复触发
+            hasSkippedIntro = true; 
+        }
+        // 标记为已检查，无论是否触发重置，本集都不再检查
+        hasCheckedRestart = true;
+    }
+
     if (video.duration < (config.introTime + 5)) return;
 
-    // --- 跳过片头 (必须开启独立开关) ---
+    // --- 跳过片头 ---
     if (config.enableIntro === true) {
         if (video.currentTime < config.introTime && !hasSkippedIntro && video.currentTime > 0.5) {
             video.currentTime = config.introTime;
@@ -141,7 +171,7 @@ function handleTimeUpdate(e) {
         }
     }
 
-    // --- 跳过片尾 (必须开启独立开关) ---
+    // --- 跳过片尾 ---
     if (config.enableOutro === true) {
         if (config.outroTime > 0) {
             const triggerTime = video.duration - config.outroTime;

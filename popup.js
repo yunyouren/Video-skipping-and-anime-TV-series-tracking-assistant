@@ -10,9 +10,10 @@ let tempKeyRewind = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.local.get({
-        autoSkipEnable: false, // 总开关
-        enableIntro: true,     // 新增：片头独立开关 (默认开)
-        enableOutro: true,     // 新增：片尾独立开关 (默认开)
+        autoSkipEnable: false,
+        enableIntro: true,
+        enableOutro: true,
+        autoRestart: false, // 新增：完播重置开关
         introTime: 90,
         outroTime: 0,
         manualSkipTime: 90,
@@ -21,19 +22,17 @@ document.addEventListener('DOMContentLoaded', () => {
         keyForward: defaultKeys.forward,
         keyRewind: defaultKeys.rewind
     }, (items) => {
-        // 回显开关状态
         document.getElementById('autoSkipEnable').checked = items.autoSkipEnable;
         document.getElementById('enableIntro').checked = items.enableIntro;
         document.getElementById('enableOutro').checked = items.enableOutro;
+        document.getElementById('autoRestart').checked = items.autoRestart; // 回显
         document.getElementById('autoPlayNext').checked = items.autoPlayNext;
 
-        // 回显数值
         document.getElementById('introTime').value = items.introTime;
         document.getElementById('outroTime').value = items.outroTime;
         document.getElementById('manualSkipTime').value = items.manualSkipTime;
         document.getElementById('minDuration').value = items.minDuration;
         
-        // 回显快捷键
         document.getElementById('keyForward').value = items.keyForward.keyName;
         document.getElementById('keyRewind').value = items.keyRewind.keyName;
         
@@ -56,35 +55,21 @@ function setupKeyRecorder(elementId, saveCallback) {
         if (e.ctrlKey) keys.push('Ctrl');
         if (e.altKey) keys.push('Alt');
         if (e.shiftKey) keys.push('Shift');
-        
         let cleanKey = e.code.replace('Key', '').replace('Arrow', ''); 
         if(e.code === 'ArrowRight') cleanKey = '→';
         if(e.code === 'ArrowLeft') cleanKey = '←';
-        
         keys.push(cleanKey);
-        const keyName = keys.join(' + ');
-        input.value = keyName;
-        const keyData = { code: e.code, shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey, keyName: keyName };
-        saveCallback(keyData);
+        input.value = keys.join(' + ');
+        saveCallback({ code: e.code, shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey, keyName: input.value });
     });
 }
 
-// 监听总开关 (即时生效)
-document.getElementById('autoSkipEnable').addEventListener('change', (e) => {
-    saveSwitch('autoSkipEnable', e.target.checked);
-});
+document.getElementById('autoSkipEnable').addEventListener('change', (e) => saveSwitch('autoSkipEnable', e.target.checked));
+document.getElementById('enableIntro').addEventListener('change', (e) => saveSwitch('enableIntro', e.target.checked));
+document.getElementById('enableOutro').addEventListener('change', (e) => saveSwitch('enableOutro', e.target.checked));
+// 监听新开关 (即时生效)
+document.getElementById('autoRestart').addEventListener('change', (e) => saveSwitch('autoRestart', e.target.checked));
 
-// 监听片头独立开关 (即时生效)
-document.getElementById('enableIntro').addEventListener('change', (e) => {
-    saveSwitch('enableIntro', e.target.checked);
-});
-
-// 监听片尾独立开关 (即时生效)
-document.getElementById('enableOutro').addEventListener('change', (e) => {
-    saveSwitch('enableOutro', e.target.checked);
-});
-
-// 辅助：单独保存开关函数
 function saveSwitch(key, value) {
     let data = {};
     data[key] = value;
@@ -94,19 +79,18 @@ function saveSwitch(key, value) {
     });
 }
 
-// 保存所有设置
 document.getElementById('saveBtn').addEventListener('click', () => {
     const config = {
         autoSkipEnable: document.getElementById('autoSkipEnable').checked,
-        enableIntro: document.getElementById('enableIntro').checked, // 保存片头开关
-        enableOutro: document.getElementById('enableOutro').checked, // 保存片尾开关
+        enableIntro: document.getElementById('enableIntro').checked,
+        enableOutro: document.getElementById('enableOutro').checked,
+        autoRestart: document.getElementById('autoRestart').checked, // 保存
         
         introTime: parseInt(document.getElementById('introTime').value) || 0,
         outroTime: parseInt(document.getElementById('outroTime').value) || 0,
         manualSkipTime: parseInt(document.getElementById('manualSkipTime').value) || 90,
         minDuration: parseInt(document.getElementById('minDuration').value) || 0,
         autoPlayNext: document.getElementById('autoPlayNext').checked,
-        
         keyForward: tempKeyForward || defaultKeys.forward,
         keyRewind: tempKeyRewind || defaultKeys.rewind
     };
