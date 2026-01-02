@@ -1,5 +1,5 @@
 // =========================================================
-// Bilibili Skipper Ultimate (Auto Update Favorites)
+// Bilibili Skipper Ultimate (Title & URL Match)
 // =========================================================
 
 if (window.hasBiliSkipperLoaded) {
@@ -13,8 +13,6 @@ let config = {
     enableIntro: true,
     enableOutro: true,
     autoRestart: false,
-    
-    // 新增开关默认值
     autoUpdateFav: true,
 
     introTime: 90,
@@ -58,10 +56,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // --- 初始化 ---
 chrome.storage.local.get(config, (items) => {
     config = { ...config, ...items };
+    // 默认按键保护
     if (!config.keyForward || !config.keyForward.code) config.keyForward = { code: 'ArrowRight', shift: true, ctrl: false, alt: false };
     if (!config.keyRewind || !config.keyRewind.code) config.keyRewind = { code: 'ArrowLeft', shift: true, ctrl: false, alt: false };
 
     checkAndApplyAutoMatch();
+
+    // 捕获模式监听按键
     window.addEventListener('keydown', onKeyHandler, true);
     if (!window.biliMonitorInterval) startMonitoring();
 });
@@ -74,17 +75,30 @@ chrome.storage.onChanged.addListener((changes) => {
     }
 });
 
+// --- 【核心修改】自动匹配逻辑 (支持标题和URL) ---
 function checkAndApplyAutoMatch() {
     if (!config.savedPresets || config.savedPresets.length === 0) return;
+    
     const currentUrl = window.location.href;
-    const matchedPreset = config.savedPresets.find(p => p.domain && p.domain.trim() !== "" && currentUrl.includes(p.domain));
+    const currentTitle = document.title; // 获取当前网页标题
+
+    // 查找匹配项：检查 URL 或 标题 是否包含预设的关键词
+    const matchedPreset = config.savedPresets.find(p => {
+        if (!p.domain || p.domain.trim() === "") return false;
+        const keyword = p.domain.trim();
+        return currentUrl.includes(keyword) || currentTitle.includes(keyword);
+    });
+
     if (matchedPreset) {
+        console.log("Skipper: 自动匹配预设 ->", matchedPreset.name);
         config.introTime = matchedPreset.intro;
         config.outroTime = matchedPreset.outro;
         config.autoRestart = matchedPreset.restart;
         config.autoPlayNext = matchedPreset.next;
         config.enableIntro = (matchedPreset.intro > 0);
         config.enableOutro = (matchedPreset.outro > 0);
+        // 可选：提示用户
+        // setTimeout(() => { showToast(`🤖 已加载配置: ${matchedPreset.name}`); }, 1000);
     }
 }
 
@@ -215,12 +229,12 @@ function parseVideoInfo() {
     return { seriesName, episodeName, siteName };
 }
 
-// --- 自动监控 ---
+// --- 监控与更新 ---
 let hasSkippedIntro = false;
 let hasTriggeredRestart = false; 
 let videoLoadStartTime = 0;      
 let restartCooldownTime = 0;
-let lastFavUpdateTime = 0; // 上次自动更新收藏的时间
+let lastFavUpdateTime = 0;
 
 function startMonitoring() {
     window.biliMonitorInterval = setInterval(() => {
@@ -236,6 +250,10 @@ function startMonitoring() {
                 videoLoadStartTime = Date.now(); 
                 restartCooldownTime = 0; 
                 lastFavUpdateTime = 0; 
+                
+                // 页面跳转/换集时，重新检查一次是否匹配新预设
+                // 因为 B站 是单页应用，换集不会刷新页面
+                setTimeout(checkAndApplyAutoMatch, 1000);
             };
             video.addEventListener('loadedmetadata', resetState);
             video.addEventListener('durationchange', resetState); 
@@ -248,31 +266,17 @@ function startMonitoring() {
         }
     }, 1000);
 }
-// --- content.js 中的 autoUpdateFavorites 函数 ---
 
 function autoUpdateFavorites(video) {
-    // 1. 检查开关
-    if (!config.autoUpdateFav) {
-        // console.log("调试: 自动更新开关未开启");
-        return;
-    }
-    
-    // 2. 限制频率
+    if (!config.autoUpdateFav) return;
     const now = Date.now();
-    if (now - lastFavUpdateTime < 10000) return; // 还没到10秒
-    
-    // 3. 只有播放超过10秒才更新
+    if (now - lastFavUpdateTime < 10000) return;
     if (video.currentTime < 10) return;
 
     try {
         const info = parseVideoInfo();
-        const sName = info.seriesName; // 当前视频解析出的名字
-
-        // console.log(`调试: 当前识别为 [${sName}]，正在检查收藏夹...`);
-
-        // 【关键】检查该剧是否在收藏夹中
+        const sName = info.seriesName;
         if (config.favorites && config.favorites[sName]) {
-            // 找到了！执行更新
             const newData = {
                 series: sName,
                 episode: info.episodeName,
@@ -282,27 +286,18 @@ function autoUpdateFavorites(video) {
                 duration: Math.floor(video.duration || 0),
                 timestamp: now
             };
-
             config.favorites[sName] = newData;
             chrome.storage.local.set({ favorites: config.favorites });
-            
-            console.log(`✅ 自动更新成功: ${sName} -> ${info.episodeName}`);
             lastFavUpdateTime = now;
-        } else {
-            console.log(`❌ 未更新: 收藏夹里找不到 [${sName}]，请先手动收藏一次。`);
         }
-    } catch (e) {
-        console.error("自动更新出错", e);
-    }
+    } catch (e) { }
 }
 
 function handleTimeUpdate(e) {
     const video = e.target;
     
-    // --- 1. 尝试自动更新收藏 ---
     autoUpdateFavorites(video);
 
-    // --- 2. 自动跳过逻辑 ---
     if (config.autoSkipEnable !== true) return;
     if (video.duration < config.minDuration) return; 
 

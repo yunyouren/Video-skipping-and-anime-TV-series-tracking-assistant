@@ -40,6 +40,7 @@
     .preset-box { background: #f0f7ff; padding: 10px; border-radius: 6px; border: 1px solid #cce4ff; margin-bottom: 15px; }
     .preset-controls { display: flex; gap: 5px; margin-top: 8px; }
     select { width: 100%; padding: 4px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 5px; outline: none; }
+    /* 更新了这里的 input 样式 */
     .domain-input { width: 100%; padding: 5px; margin-bottom: 5px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; background: #fff; }
     .btn-small { padding: 4px 10px; font-size: 12px; cursor: pointer; border: 1px solid #ddd; background: white; border-radius: 4px; flex-grow: 1;}
     .btn-small:hover { background: #eef; color: #00aeec; border-color: #00aeec; }
@@ -49,14 +50,12 @@
     input[type="number"] { width: 50px; padding: 4px; text-align: center; border: 1px solid #ddd; border-radius: 4px; }
     .key-input { width: 110px; padding: 4px 8px; font-size: 12px; text-align: right; border: 1px solid #ddd; border-radius: 4px; background: #fafafa; cursor: pointer; color: #555; }
     
-    /* 开关 */
     .switch { position: relative; display: inline-block; width: 32px; height: 18px; margin-right: 5px; }
     .switch input { opacity: 0; width: 0; height: 0; }
     .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 20px; }
     .slider:before { position: absolute; content: ""; height: 12px; width: 12px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
     input:checked + .slider { background-color: #00aeec; }
     input:checked + .slider:before { transform: translateX(14px); }
-    /* 迷你开关 */
     .switch.mini { width: 26px; height: 14px; margin-right: 0; }
     .switch.mini .slider:before { height: 10px; width: 10px; left: 2px; bottom: 2px; }
     .switch.mini input:checked + .slider:before { transform: translateX(12px); }
@@ -90,7 +89,7 @@
 
   <div class="preset-box">
     <select id="presetSelect"><option value="">-- 预设方案 --</option></select>
-    <input type="text" id="domainMatch" class="domain-input" placeholder="自动匹配关键词">
+    <input type="text" id="domainMatch" class="domain-input" placeholder="自动匹配: 输入 标题关键字 或 URL">
     <div class="preset-controls">
       <button id="applyPresetBtn" class="btn-small">读取</button>
       <button id="addPresetBtn" class="btn-small btn-add">保存</button>
