@@ -3,41 +3,57 @@
 <head>
   <meta charset="UTF-8">
   <style>
-    body { width: 250px; padding: 15px; font-family: "Segoe UI", sans-serif; color: #333; }
-    h3 { margin: 0 0 15px 0; color: #00aeec; font-size: 16px; border-bottom: 2px solid #f1f2f3; padding-bottom: 8px;}
+    body { width: 260px; padding: 15px; font-family: "Segoe UI", sans-serif; color: #333; }
+    h3 { margin: 0 0 10px 0; color: #00aeec; font-size: 16px; border-bottom: 2px solid #f1f2f3; padding-bottom: 8px; display: flex; justify-content: space-between; align-items: center;}
     
-    .section { margin-bottom: 15px; }
+    /* 通用布局 */
+    .section { margin-bottom: 12px; }
     .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 13px; height: 28px; }
     
+    /* 预设区域样式 (新) */
+    .preset-box { background: #f7f9fa; padding: 10px; border-radius: 6px; border: 1px solid #eee; margin-bottom: 15px; }
+    .preset-controls { display: flex; gap: 5px; margin-top: 5px; }
+    select { flex-grow: 1; padding: 4px; border: 1px solid #ddd; border-radius: 4px; outline: none; }
+    .btn-small { padding: 4px 8px; font-size: 12px; cursor: pointer; border: 1px solid #ddd; background: white; border-radius: 4px; }
+    .btn-small:hover { background: #eef; color: #00aeec; border-color: #00aeec; }
+    .btn-add { color: green; font-weight: bold; }
+    .btn-del { color: red; font-weight: bold; }
+
+    /* 输入框与开关 */
     input[type="number"] { width: 50px; padding: 4px; text-align: center; border: 1px solid #ddd; border-radius: 4px; }
+    .key-input { width: 110px; padding: 4px 8px; font-size: 12px; text-align: right; border: 1px solid #ddd; border-radius: 4px; background: #fafafa; cursor: pointer; color: #555; }
     
-    .key-input { 
-      width: 110px; padding: 4px 8px; font-size: 12px; text-align: right; 
-      border: 1px solid #ddd; border-radius: 4px; background: #fafafa; cursor: pointer; color: #555;
-    }
-    .key-input:focus { border-color: #00aeec; background: white; outline: none; }
-    
+    /* 开关 */
     .switch { position: relative; display: inline-block; width: 32px; height: 18px; margin-right: 5px; }
     .switch input { opacity: 0; width: 0; height: 0; }
     .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 20px; }
     .slider:before { position: absolute; content: ""; height: 12px; width: 12px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
     input:checked + .slider { background-color: #00aeec; }
     input:checked + .slider:before { transform: translateX(14px); }
-
     .control-group { display: flex; align-items: center; }
 
-    button { 
-      width: 100%; padding: 8px; background-color: #00aeec; color: white; 
-      border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-top: 5px;
-    }
-    button:hover { background-color: #009cd6; }
-    #status { margin-top: 8px; font-size: 12px; color: green; text-align: center; height: 16px; }
+    /* 底部大按钮 */
+    .btn-main { width: 100%; padding: 8px; background-color: #00aeec; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-top: 5px; }
+    .btn-main:hover { background-color: #009cd6; }
     
-    hr { border:0; border-top:1px solid #eee; margin:12px 0; }
+    #status { margin-top: 8px; font-size: 12px; color: green; text-align: center; height: 16px; }
+    hr { border:0; border-top:1px solid #eee; margin:10px 0; }
   </style>
 </head>
 <body>
-  <h3>⚡ B站跳略助手 Ultimate</h3>
+  <h3>⚡ 跳略助手 Ultimate</h3>
+
+  <div class="preset-box">
+    <div style="font-size: 12px; color: #666; margin-bottom: 4px;">📁 快捷方案调取</div>
+    <select id="presetSelect">
+      <option value="">-- 选择预设 --</option>
+    </select>
+    <div class="preset-controls">
+      <button id="applyPresetBtn" class="btn-small" style="flex-grow: 1;">应用选中方案</button>
+      <button id="addPresetBtn" class="btn-small btn-add" title="保存当前设置为新预设">+</button>
+      <button id="delPresetBtn" class="btn-small btn-del" title="删除选中预设">-</button>
+    </div>
+  </div>
 
   <div class="section">
     <div class="row">
@@ -53,39 +69,27 @@
     <div class="row">
       <span>跳过片头</span>
       <div class="control-group">
-        <label class="switch" title="开启片头跳过">
-          <input type="checkbox" id="enableIntro">
-          <span class="slider"></span>
-        </label>
+        <label class="switch"><input type="checkbox" id="enableIntro"><span class="slider"></span></label>
         <input type="number" id="introTime" min="0" placeholder="秒">
       </div>
     </div>
 
     <div class="row">
-      <span style="font-size: 12px; color: #666;">↳ 若已看完则重置</span>
-      <label class="switch" title="打开视频时若处于片尾，自动跳回片头结束处">
-        <input type="checkbox" id="autoRestart">
-        <span class="slider"></span>
-      </label>
+      <span style="font-size: 12px; color: #666;">↳ 完播自动重置</span>
+      <label class="switch"><input type="checkbox" id="autoRestart"><span class="slider"></span></label>
     </div>
 
     <div class="row" style="margin-top: 10px;">
       <span>跳过片尾</span>
       <div class="control-group">
-        <label class="switch" title="开启片尾跳过">
-          <input type="checkbox" id="enableOutro">
-          <span class="slider"></span>
-        </label>
+        <label class="switch"><input type="checkbox" id="enableOutro"><span class="slider"></span></label>
         <input type="number" id="outroTime" min="0" placeholder="秒">
       </div>
     </div>
 
     <div class="row">
       <span>直接切下一集</span>
-      <label class="switch" title="跳过片尾时直接点击下一集">
-        <input type="checkbox" id="autoPlayNext">
-        <span class="slider"></span>
-      </label>
+      <label class="switch"><input type="checkbox" id="autoPlayNext"><span class="slider"></span></label>
     </div>
 
     <div class="row" style="margin-top: 10px; color: #ff6600;">
@@ -98,20 +102,20 @@
 
   <div class="section">
     <div class="row">
-      <span>跨度 (秒)</span>
+      <span>快进/退 (秒)</span>
       <input type="number" id="manualSkipTime" min="1">
     </div>
     <div class="row">
       <span>快进键</span>
-      <input type="text" id="keyForward" class="key-input" placeholder="点击录入" readonly>
+      <input type="text" id="keyForward" class="key-input" readonly>
     </div>
     <div class="row">
       <span>快退键</span>
-      <input type="text" id="keyRewind" class="key-input" placeholder="点击录入" readonly>
+      <input type="text" id="keyRewind" class="key-input" readonly>
     </div>
   </div>
 
-  <button id="saveBtn">保存配置</button>
+  <button id="saveBtn" class="btn-main">保存配置</button>
   <div id="status"></div>
   <script src="popup.js"></script>
 </body>
