@@ -1,15 +1,21 @@
 {
   "manifest_version": 3,
   "name": "Bilibili 强力跳略助手",
-  "version": "2.0",
-  "description": "Shift+箭头跳略，支持自定义跳过秒数。",
+  "version": "3.0",
+  "description": "智能跳过片头片尾，支持追番收藏与快捷键控制。",
   "icons": {
     "16": "icon.png",
     "48": "icon.png",
     "128": "icon.png"
   },
   "permissions": [
-    "storage"
+    "storage",
+    "tabs",
+    "scripting",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js"
@@ -18,7 +24,7 @@
     "default_popup": "popup.html",
     "default_icon": "icon.png"
   },
-"content_scripts": [
+  "content_scripts": [
     {
       "matches": ["<all_urls>"], 
       "js": ["content.js"],

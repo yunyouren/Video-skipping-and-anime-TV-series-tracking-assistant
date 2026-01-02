@@ -1,5 +1,5 @@
 // =========================================================
-// Bilibili Skipper Ultimate (Auto Domain Match)
+// Bilibili Skipper Ultimate (Regex Cleaner)
 // =========================================================
 
 if (window.hasBiliSkipperLoaded) {
@@ -9,6 +9,7 @@ window.hasBiliSkipperLoaded = true;
 
 // --- 全局配置 ---
 let config = {
+    // ... (这里保持不变，为了节省空间，配置变量部分和之前一样即可，关键是下面的函数)
     autoSkipEnable: false,
     enableIntro: true,
     enableOutro: true,
@@ -20,19 +21,50 @@ let config = {
     autoPlayNext: false,
     keyForward: { code: 'ArrowRight', shift: true, ctrl: false, alt: false },
     keyRewind: { code: 'ArrowLeft', shift: true, ctrl: false, alt: false },
-    savedPresets: [] // 存储预设列表
+    savedPresets: []
 };
 
 let isSwitchingEpisode = false;
 
+// --- 消息监听 (响应 Popup 的收藏请求) ---
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === "getRequestVideoInfo") {
+        console.log("Skipper: 收到收藏请求...");
+        
+        const video = findMainVideo();
+        if (!video) {
+            console.warn("Skipper: 当前上下文未找到 video 标签 (可能是iframe或非视频区)");
+            // 这里不返回错误，直接不响应，防止干扰主Frame的响应
+            // 或者返回一个特定的标识让popup忽略
+            return; 
+        }
+        
+        try {
+            const info = parseVideoInfo();
+            const data = {
+                series: info.seriesName, 
+                episode: info.episodeName,     
+                site: info.siteName,
+                url: window.location.href,
+                time: Math.floor(video.currentTime),
+                duration: Math.floor(video.duration || 0),
+                timestamp: Date.now()
+            };
+            console.log("Skipper: 返回数据 ->", data);
+            sendResponse(data);
+        } catch (e) {
+            console.error("Skipper: 解析出错", e);
+            sendResponse({ error: "parse_error" });
+        }
+    }
+    // 异步响应
+    return true; 
+});
+
 // --- 初始化 ---
 chrome.storage.local.get(config, (items) => {
     config = { ...config, ...items };
-    
-    // 1. 【核心逻辑】执行自动网址匹配
     checkAndApplyAutoMatch();
-
-    // 2. 启动功能
     document.addEventListener('keydown', onKeyHandler);
     if (!window.biliMonitorInterval) {
         startMonitoring();
@@ -47,51 +79,19 @@ chrome.storage.onChanged.addListener((changes) => {
     }
 });
 
-// --- 新增：自动匹配函数 ---
 function checkAndApplyAutoMatch() {
-    // 必须有预设才匹配
     if (!config.savedPresets || config.savedPresets.length === 0) return;
-
     const currentUrl = window.location.href;
-    
-    // 寻找匹配项 (只要 URL 包含 domain 关键词即可)
-    // 注意：如果有多个匹配，取第一个找到的
     const matchedPreset = config.savedPresets.find(p => p.domain && p.domain.trim() !== "" && currentUrl.includes(p.domain));
-
     if (matchedPreset) {
-        console.log("Skipper: 检测到域名匹配 ->", matchedPreset.name);
-        
-        // 覆盖当前内存中的配置
         config.introTime = matchedPreset.intro;
         config.outroTime = matchedPreset.outro;
         config.autoRestart = matchedPreset.restart;
         config.autoPlayNext = matchedPreset.next;
         config.enableIntro = (matchedPreset.intro > 0);
         config.enableOutro = (matchedPreset.outro > 0);
-        // 如果你希望自动匹配时也开启总开关，解开下面这行注释
-        // config.autoSkipEnable = true; 
-
-        // 提示用户
-        // 稍微延迟一点显示，让用户注意到
-        setTimeout(() => {
-            showToast(`🤖 已自动应用: ${matchedPreset.name}`);
-        }, 1000);
-
-        // 【可选】是否将自动匹配的结果写回硬盘？
-        // 写回的好处：点开插件图标时，看到的界面就是匹配后的状态
-        // 坏处：会覆盖掉你之前的全局设置
-        // 建议：写回。因为用户既然打开了这个网站，就希望插件处于这个状态。
-        chrome.storage.local.set({
-            introTime: matchedPreset.intro,
-            outroTime: matchedPreset.outro,
-            autoRestart: matchedPreset.restart,
-            autoPlayNext: matchedPreset.next,
-            enableIntro: (matchedPreset.intro > 0),
-            enableOutro: (matchedPreset.outro > 0)
-        });
     }
 }
-
 
 // --- 辅助函数 ---
 function findMainVideo() {
@@ -132,16 +132,13 @@ function tryClickNext() {
     return false;
 }
 
-// --- 键盘快捷键 ---
 function onKeyHandler(event) {
     const isForward = isKeyMatch(event, config.keyForward);
     const isRewind = isKeyMatch(event, config.keyRewind);
     if (!isForward && !isRewind) return;
-
     const video = findMainVideo();
     if (!video) return;
     const skipTime = config.manualSkipTime;
-
     if (isForward) {
         video.currentTime += skipTime;
         showToast(`>>> 快进 ${skipTime} 秒`);
@@ -153,7 +150,89 @@ function onKeyHandler(event) {
     event.stopPropagation();
 }
 
-// --- 自动监控逻辑 ---
+// --- 【核心升级】智能信息提取 ---
+function parseVideoInfo() {
+    const rawTitle = document.title.trim();
+    const url = window.location.href;
+    
+    let seriesName = "";
+    let episodeName = "";
+    let siteName = "Web";
+
+    // 1. 尝试从 B站 专用元素获取 (最准)
+    if (url.includes("bilibili.com")) {
+        siteName = "B站";
+        const mediaTitleEl = document.querySelector('.media-title, .media-info-title, .bangumi-title');
+        const podTitleEl = document.querySelector('.video-pod-title, .up-info-container .title');
+
+        if (mediaTitleEl) {
+            seriesName = mediaTitleEl.innerText.trim(); // 拿到纯净的 "神奇阿呦"
+        } else if (podTitleEl) {
+            seriesName = podTitleEl.innerText.trim();
+        }
+    } else if (url.includes("iqiyi")) {
+        siteName = "爱奇艺";
+    }
+
+    // 2. 如果页面元素抓取失败，进入【强力正则清洗模式】
+    if (!seriesName) {
+        // 先去掉 B站 的那些固定后缀
+        let cleanTitle = rawTitle
+            .replace(/_bilibili.*/i, "")
+            .replace(/-bilibili.*/i, "")
+            .replace(/_哔哩哔哩.*/i, "")
+            .replace(/-哔哩哔哩.*/i, "")
+            .replace(/-国创.*/i, "")      // 去掉 -国创
+            .replace(/-番剧.*/i, "")
+            .replace(/-全集.*/i, "")
+            .replace(/-高清.*/i, "")
+            .replace(/在线观看.*/i, "")
+            .trim();
+
+        // 尝试匹配 "神奇阿呦第30集" 这种连在一起的
+        // 正则解释：(.+) 匹配任意字符作为剧名，直到遇到 第xx集
+        const matchEpisode = cleanTitle.match(/(.*?)[\s-]*(第\s*\d+\s*[集话]|Ep\.?\s*\d+|Vol\.\d+)/i);
+        
+        if (matchEpisode) {
+            seriesName = matchEpisode[1].trim(); // 第一组是剧名
+            episodeName = matchEpisode[2].trim(); // 第二组是集数
+        } else {
+            // 如果没找到"第x集"字样，可能是普通视频，尝试用下划线分割
+            const parts = cleanTitle.split('_');
+            if (parts.length >= 2) {
+                seriesName = parts[1].trim();
+                episodeName = parts[0].trim();
+            } else {
+                seriesName = cleanTitle; // 实在没招了，就用剩下的全部
+            }
+        }
+    }
+
+    // 3. 补充提取集数 (如果上面没提取到)
+    if (!episodeName) {
+        // 再次尝试从原始标题里找 "第xx集"
+        const epMatch = rawTitle.match(/(第\s*\d+\s*[集话]|Ep\.?\s*\d+)/i);
+        if (epMatch) {
+            episodeName = epMatch[0];
+        } else {
+            // 看看是不是 P1, P2 这种 BV 分P
+            const pMatch = url.match(/p=(\d+)/);
+            if (pMatch) {
+                episodeName = `P${pMatch[1]}`;
+            } else {
+                episodeName = "观看中";
+            }
+        }
+    }
+    
+    // 4. 最终打磨
+    // 去掉剧名里可能残留的 "第xx集" (如果上面逻辑漏了)
+    seriesName = seriesName.replace(/(第\s*\d+\s*[集话]).*/, "").trim();
+
+    return { seriesName, episodeName, siteName };
+}
+
+// --- 自动监控 (保持不变) ---
 let hasSkippedIntro = false;
 let hasTriggeredRestart = false; 
 let videoLoadStartTime = 0;      
@@ -190,31 +269,21 @@ function startMonitoring() {
 
 function handleTimeUpdate(e) {
     const video = e.target;
-    
-    // 1. 总开关
     if (config.autoSkipEnable !== true) return;
-    
-    // 2. 短视频保护
     if (video.duration < config.minDuration) return; 
 
-    // --- 完播重置 (Safe Landing) ---
+    // 完播重置
     if (config.autoRestart === true && !hasTriggeredRestart) {
         if (Date.now() - videoLoadStartTime < 4000) {
             const timeLeft = video.duration - video.currentTime;
-            
             if (timeLeft < 30 || video.currentTime / video.duration > 0.95) {
-                console.log("Skipper: 触发完播重置...");
-
+                console.log("Skipper: 触发完播重置");
                 const outroTriggerTime = video.duration - (config.enableOutro ? config.outroTime : 0);
                 let targetPos = config.enableIntro ? config.introTime : 0;
-
-                if (targetPos >= outroTriggerTime) {
-                    targetPos = 0;
-                }
-
+                if (targetPos >= outroTriggerTime) { targetPos = 0; }
+                
                 video.currentTime = targetPos;
                 showToast(`↺ 已重置到 ${targetPos}秒`);
-                
                 hasTriggeredRestart = true;
                 hasSkippedIntro = true;
                 restartCooldownTime = Date.now() + 5000; 
@@ -222,7 +291,7 @@ function handleTimeUpdate(e) {
         }
     }
 
-    // --- 跳过片头 ---
+    // 跳过片头
     const outroTriggerTime = video.duration - (config.enableOutro ? config.outroTime : 0);
     const targetIntroTime = config.introTime;
     const isOverlap = targetIntroTime >= outroTriggerTime;
@@ -239,15 +308,13 @@ function handleTimeUpdate(e) {
         }
     }
 
-    // --- 跳过片尾 ---
+    // 跳过片尾
     if (config.enableOutro === true) {
         if (Date.now() < restartCooldownTime) return;
-
         if (config.outroTime > 0) {
             if (video.currentTime > outroTriggerTime && video.currentTime < video.duration) {
                 if (Date.now() - videoLoadStartTime < 4000 && !hasTriggeredRestart) return;
                 if (isSwitchingEpisode) return;
-
                 if (config.autoPlayNext === true) {
                     const success = tryClickNext();
                     if (success) {
@@ -256,7 +323,6 @@ function handleTimeUpdate(e) {
                         return;
                     }
                 }
-                
                 if (!isSwitchingEpisode) { 
                     video.currentTime = video.duration; 
                     showToast(`🚀 跳过片尾`);
@@ -266,7 +332,6 @@ function handleTimeUpdate(e) {
     }
 }
 
-// --- 提示框 ---
 let toastTimeout;
 function showToast(text) {
     let toast = document.getElementById('bili-skipper-toast');

@@ -5,17 +5,16 @@ const defaultKeys = {
     rewind: { code: 'ArrowLeft', shift: true, ctrl: false, alt: false, keyName: 'Shift + ←' }
 };
 
-// 【关键】默认预设增加 domain 字段
 const defaultPresets = [
     { name: "B站标准 (自动)", intro: 90, outro: 0, restart: false, next: false, domain: "bilibili" },
     { name: "爱奇艺 (自动)", intro: 120, outro: 30, restart: true, next: true, domain: "iqiyi" },
-    { name: "腾讯视频 (自动)", intro: 110, outro: 15, restart: true, next: true, domain: "v.qq.com" },
-    { name: "YouTube (手动)", intro: 0, outro: 0, restart: false, next: false, domain: "youtube" }
+    { name: "腾讯视频 (自动)", intro: 110, outro: 15, restart: true, next: true, domain: "v.qq.com" }
 ];
 
 let tempKeyForward = null;
 let tempKeyRewind = null;
 let currentPresets = [];
+let currentFavorites = {}; // 收藏数据
 
 document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.local.get({
@@ -30,11 +29,18 @@ document.addEventListener('DOMContentLoaded', () => {
         autoPlayNext: false,
         keyForward: defaultKeys.forward,
         keyRewind: defaultKeys.rewind,
-        savedPresets: defaultPresets
+        savedPresets: defaultPresets,
+        
+        // 变更为 favorites
+        favorites: {} 
     }, (items) => {
         loadConfigToUI(items);
         currentPresets = items.savedPresets;
+        currentFavorites = items.favorites; // 加载收藏
+        
         renderPresetDropdown();
+        renderFavoritesList(); // 渲染收藏列表
+        
         tempKeyForward = items.keyForward;
         tempKeyRewind = items.keyRewind;
         updateStatusText(items.autoSkipEnable);
@@ -44,89 +50,152 @@ document.addEventListener('DOMContentLoaded', () => {
     setupKeyRecorder('keyRewind', (keyData) => { tempKeyRewind = keyData; });
 });
 
-// --- 预设管理 ---
+// --- ⭐ 收藏功能核心 ---
+
+// 按钮：添加当前视频
+document.getElementById('addFavBtn').addEventListener('click', () => {
+    chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+        if (tabs.length === 0) return;
+        
+        // 发送消息
+        chrome.tabs.sendMessage(tabs[0].id, { action: "getRequestVideoInfo" }, (response) => {
+            
+            // 1. 检查通信错误 (比如脚本没注入，或者页面刷新了但插件没重新加载)
+            if (chrome.runtime.lastError) {
+                console.error("通信错误:", chrome.runtime.lastError.message);
+                showTempMessage("请刷新视频页面!", "red");
+                return;
+            }
+
+            // 2. 检查逻辑错误
+            if (!response) {
+                showTempMessage("未收到响应", "red");
+                return;
+            }
+            if (response.error === "no_video") {
+                showTempMessage("页面没有检测到视频", "red");
+                return;
+            }
+            if (!response.series) {
+                showTempMessage("标题解析失败", "red");
+                return;
+            }
+
+            // 3. 正常保存
+            currentFavorites[response.series] = response;
+            chrome.storage.local.set({ favorites: currentFavorites }, () => {
+                renderFavoritesList();
+                showTempMessage("收藏成功 ✅");
+            });
+        });
+    });
+});
+
+function renderFavoritesList() {
+    const listDiv = document.getElementById('favList');
+    if (!currentFavorites || Object.keys(currentFavorites).length === 0) {
+        listDiv.innerHTML = '<div style="padding:15px; text-align:center; color:#999; font-size:12px;">暂无收藏</div>';
+        return;
+    }
+
+    listDiv.innerHTML = '';
+    // 按时间倒序排列 (最近收藏/观看的在上面)
+    const sortedItems = Object.values(currentFavorites).sort((a, b) => b.timestamp - a.timestamp);
+    const formatTime = (seconds) => {
+        const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+        const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+        return `${m}:${s}`;
+    };
+
+    sortedItems.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'fav-item';
+        div.title = "点击跳转续看";
+        
+        div.innerHTML = `
+            <div class="fav-series">${item.series}</div>
+            <div class="fav-episode">
+                <span><span class="fav-tag">${item.site}</span>${item.episode}</span>
+                <span class="fav-time">${formatTime(item.time)} / ${formatTime(item.duration)}</span>
+            </div>
+            <div class="fav-del" title="删除">×</div>
+        `;
+        
+        // 点击跳转
+        div.addEventListener('click', (e) => {
+            // 如果点的是删除按钮，不跳转
+            if (e.target.classList.contains('fav-del')) return;
+            chrome.tabs.create({ url: item.url });
+        });
+
+        // 点击删除
+        div.querySelector('.fav-del').addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (confirm(`不再追 "${item.series}" 了吗?`)) {
+                delete currentFavorites[item.series];
+                chrome.storage.local.set({ favorites: currentFavorites });
+                renderFavoritesList();
+            }
+        });
+        
+        listDiv.appendChild(div);
+    });
+}
+
+
+// ... (以下代码保持不变：预设管理、通用逻辑等) ...
 
 function renderPresetDropdown() {
     const select = document.getElementById('presetSelect');
-    const selectedValue = select.value; // 记住当前选中的值
+    const selectedValue = select.value;
     select.innerHTML = '<option value="">-- 选择或新建 --</option>';
     currentPresets.forEach((preset, index) => {
         const option = document.createElement('option');
         option.value = index;
-        // 如果有域名，显示在名字后面
         const domainText = preset.domain ? ` [🔗${preset.domain}]` : '';
         option.textContent = `${preset.name}${domainText}`;
         select.appendChild(option);
     });
-    // 尝试恢复选中状态
-    if(selectedValue && currentPresets[selectedValue]) {
-        select.value = selectedValue;
-    }
+    if(selectedValue && currentPresets[selectedValue]) select.value = selectedValue;
 }
 
-// 监听下拉框变化：自动填充域名输入框
 document.getElementById('presetSelect').addEventListener('change', (e) => {
     const index = e.target.value;
     const domainInput = document.getElementById('domainMatch');
-    if (index !== "") {
-        domainInput.value = currentPresets[index].domain || "";
-    } else {
-        domainInput.value = "";
-    }
+    if (index !== "") domainInput.value = currentPresets[index].domain || "";
+    else domainInput.value = "";
 });
 
-// 按钮：应用选中预设
 document.getElementById('applyPresetBtn').addEventListener('click', () => {
     const index = document.getElementById('presetSelect').value;
-    if (index === "") return showTempMessage("请先选择一个预设", "red");
-
+    if (index === "") return showTempMessage("请先选择预设", "red");
     const p = currentPresets[index];
     loadPresetToUI(p);
-    
-    // 立即保存应用
     document.getElementById('saveBtn').click();
     showTempMessage(`已加载: ${p.name}`);
 });
 
-// 按钮：保存/更新预设
 document.getElementById('addPresetBtn').addEventListener('click', () => {
     const index = document.getElementById('presetSelect').value;
     const domain = document.getElementById('domainMatch').value.trim();
-    
-    // 如果没有选中现有的，就是新建
     if (index === "") {
-        const name = prompt("请输入新预设的名称:");
+        const name = prompt("新预设名称:");
         if (!name) return;
-        const newPreset = createPresetFromUI(name, domain);
-        currentPresets.push(newPreset);
-    } 
-    // 如果选中了现有的，就是更新
-    else {
+        currentPresets.push(createPresetFromUI(name, domain));
+    } else {
         const p = currentPresets[index];
-        if (confirm(`要更新 "${p.name}" 的配置吗?`)) {
-            // 保留名字，更新数据
-            const updatedPreset = createPresetFromUI(p.name, domain);
-            currentPresets[index] = updatedPreset;
-        } else {
-            return;
-        }
+        if (confirm(`更新 "${p.name}"?`)) currentPresets[index] = createPresetFromUI(p.name, domain);
+        else return;
     }
-
     savePresetsToStorage();
     renderPresetDropdown();
-    // 选中最后一个（如果是新建）或保持当前选中
-    if (index === "") {
-        document.getElementById('presetSelect').value = currentPresets.length - 1;
-    } else {
-        document.getElementById('presetSelect').value = index;
-    }
-    showTempMessage("预设已保存 ✅");
+    showTempMessage("已保存 ✅");
 });
 
 document.getElementById('delPresetBtn').addEventListener('click', () => {
     const index = document.getElementById('presetSelect').value;
     if (index === "") return;
-    if (confirm(`删除预设 "${currentPresets[index].name}"?`)) {
+    if (confirm("确定删除?")) {
         currentPresets.splice(index, 1);
         savePresetsToStorage();
         renderPresetDropdown();
@@ -136,13 +205,11 @@ document.getElementById('delPresetBtn').addEventListener('click', () => {
 
 function createPresetFromUI(name, domain) {
     return {
-        name: name,
-        domain: domain, // 保存域名关键词
+        name: name, domain: domain,
         intro: parseInt(document.getElementById('introTime').value) || 0,
         outro: parseInt(document.getElementById('outroTime').value) || 0,
         restart: document.getElementById('autoRestart').checked,
         next: document.getElementById('autoPlayNext').checked,
-        // 这里为了简化，不保存按键配置到预设里，只保存时间配置。如果你需要也可以加。
     };
 }
 
@@ -151,17 +218,13 @@ function loadPresetToUI(p) {
     document.getElementById('outroTime').value = p.outro;
     document.getElementById('autoRestart').checked = p.restart;
     document.getElementById('autoPlayNext').checked = p.next;
-    
     document.getElementById('enableIntro').checked = (p.intro > 0);
     document.getElementById('enableOutro').checked = (p.outro > 0);
     document.getElementById('domainMatch').value = p.domain || "";
 }
 
-function savePresetsToStorage() {
-    chrome.storage.local.set({ savedPresets: currentPresets });
-}
+function savePresetsToStorage() { chrome.storage.local.set({ savedPresets: currentPresets }); }
 
-// --- 通用 UI 逻辑 ---
 function loadConfigToUI(items) {
     document.getElementById('autoSkipEnable').checked = items.autoSkipEnable;
     document.getElementById('enableIntro').checked = items.enableIntro;
@@ -194,7 +257,6 @@ function setupKeyRecorder(elementId, saveCallback) {
     });
 }
 
-// 保存主配置
 document.getElementById('saveBtn').addEventListener('click', () => {
     const config = {
         autoSkipEnable: document.getElementById('autoSkipEnable').checked,
@@ -208,11 +270,10 @@ document.getElementById('saveBtn').addEventListener('click', () => {
         minDuration: parseInt(document.getElementById('minDuration').value) || 0,
         keyForward: tempKeyForward || defaultKeys.forward,
         keyRewind: tempKeyRewind || defaultKeys.rewind,
-        savedPresets: currentPresets // 同步保存列表
+        savedPresets: currentPresets,
+        favorites: currentFavorites // 保存收藏
     };
-    chrome.storage.local.set(config, () => {
-        showTempMessage('✅ 配置已保存并生效');
-    });
+    chrome.storage.local.set(config, () => { showTempMessage('✅ 配置已保存'); });
 });
 
 const switches = ['autoSkipEnable', 'enableIntro', 'enableOutro', 'autoRestart', 'autoPlayNext'];

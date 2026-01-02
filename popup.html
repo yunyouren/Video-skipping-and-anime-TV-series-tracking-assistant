@@ -3,32 +3,53 @@
 <head>
   <meta charset="UTF-8">
   <style>
-    body { width: 270px; padding: 15px; font-family: "Segoe UI", sans-serif; color: #333; }
+    body { width: 280px; padding: 15px; font-family: "Segoe UI", sans-serif; color: #333; }
     h3 { margin: 0 0 10px 0; color: #00aeec; font-size: 16px; border-bottom: 2px solid #f1f2f3; padding-bottom: 8px; display: flex; justify-content: space-between; align-items: center;}
     
     .section { margin-bottom: 12px; }
     .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 13px; height: 28px; }
     
-    /* 预设区域样式 */
+    /* 收藏夹样式 */
+    .fav-box { 
+      background: #fff; border: 1px solid #eee; border-radius: 6px; 
+      margin-bottom: 15px; max-height: 200px; overflow-y: auto;
+    }
+    .fav-header {
+      background: #fff8f0; padding: 8px 10px; font-size: 12px; color: #d68100; font-weight: bold; border-bottom: 1px solid #ffeeba;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .btn-add-fav {
+      background: #ff9800; color: white; border: none; border-radius: 4px; padding: 3px 8px; cursor: pointer; font-size: 11px;
+    }
+    .btn-add-fav:hover { background: #e68900; }
+
+    .fav-item {
+      padding: 8px 10px; border-bottom: 1px solid #f5f5f5; cursor: pointer; transition: background 0.2s; position: relative;
+    }
+    .fav-item:last-child { border-bottom: none; }
+    .fav-item:hover { background: #f0f8ff; }
+    
+    .fav-series { font-size: 13px; font-weight: bold; color: #333; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px;}
+    .fav-episode { font-size: 11px; color: #00aeec; display: flex; justify-content: space-between; }
+    .fav-time { color: #999; }
+    .fav-tag { background: #eee; padding: 1px 4px; border-radius: 3px; font-size: 10px; color: #666; margin-right: 4px; }
+    
+    /* 删除按钮 */
+    .fav-del {
+      position: absolute; right: 5px; top: 8px; color: #ccc; font-weight: bold; font-size: 14px; display: none; padding: 2px;
+    }
+    .fav-item:hover .fav-del { display: block; color: #ff4d4f; }
+
+    /* 预设和设置样式 */
     .preset-box { background: #f0f7ff; padding: 10px; border-radius: 6px; border: 1px solid #cce4ff; margin-bottom: 15px; }
     .preset-controls { display: flex; gap: 5px; margin-top: 8px; }
-    
     select { width: 100%; padding: 4px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 5px; outline: none; }
-    
-    /* 新增：域名输入框样式 */
-    .domain-input { 
-      width: 100%; padding: 5px; margin-bottom: 5px; 
-      border: 1px solid #ddd; border-radius: 4px; font-size: 12px; 
-      background: #fff;
-    }
-    .domain-input::placeholder { color: #999; }
-
+    .domain-input { width: 100%; padding: 5px; margin-bottom: 5px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; background: #fff; }
     .btn-small { padding: 4px 10px; font-size: 12px; cursor: pointer; border: 1px solid #ddd; background: white; border-radius: 4px; flex-grow: 1;}
     .btn-small:hover { background: #eef; color: #00aeec; border-color: #00aeec; }
     .btn-add { background: #eaffea; color: green; border-color: #ccffcc; }
     .btn-del { background: #ffeaea; color: red; border-color: #ffcccc; flex-grow: 0; width: 30px;}
 
-    /* 其他通用样式保持不变 */
     input[type="number"] { width: 50px; padding: 4px; text-align: center; border: 1px solid #ddd; border-radius: 4px; }
     .key-input { width: 110px; padding: 4px 8px; font-size: 12px; text-align: right; border: 1px solid #ddd; border-radius: 4px; background: #fafafa; cursor: pointer; color: #555; }
     .switch { position: relative; display: inline-block; width: 32px; height: 18px; margin-right: 5px; }
@@ -45,21 +66,25 @@
   </style>
 </head>
 <body>
-  <h3>⚡ 跳略助手 Auto</h3>
+  <h3>⚡ 跳略助手 Ultimate</h3>
+
+  <div class="fav-box">
+    <div class="fav-header">
+      <span>⭐ 我的追番收藏</span>
+      <button id="addFavBtn" class="btn-add-fav">+ 收藏当前</button>
+    </div>
+    <div id="favList">
+      <div style="padding:15px; text-align:center; color:#999; font-size:12px;">暂无收藏</div>
+    </div>
+  </div>
 
   <div class="preset-box">
-    <div style="font-size: 12px; color: #0078d4; margin-bottom: 5px; font-weight: bold;">📁 智能预设方案</div>
-    
-    <select id="presetSelect">
-      <option value="">-- 选择或新建 --</option>
-    </select>
-    
+    <select id="presetSelect"><option value="">-- 预设方案 --</option></select>
     <input type="text" id="domainMatch" class="domain-input" placeholder="自动匹配关键词 (如: bilibili)">
-    
     <div class="preset-controls">
       <button id="applyPresetBtn" class="btn-small">读取</button>
-      <button id="addPresetBtn" class="btn-small btn-add">保存/更新</button>
-      <button id="delPresetBtn" class="btn-small btn-del" title="删除预设">×</button>
+      <button id="addPresetBtn" class="btn-small btn-add">保存</button>
+      <button id="delPresetBtn" class="btn-small btn-del">×</button>
     </div>
   </div>
 
@@ -68,7 +93,9 @@
       <span style="font-weight: bold;">启用自动跳过</span>
       <label class="switch"><input type="checkbox" id="autoSkipEnable"><span class="slider"></span></label>
     </div>
+    
     <hr>
+
     <div class="row">
       <span>跳过片头</span>
       <div class="control-group">
@@ -76,10 +103,12 @@
         <input type="number" id="introTime" min="0" placeholder="秒">
       </div>
     </div>
+    
     <div class="row">
       <span style="font-size: 12px; color: #666;">↳ 完播自动重置</span>
       <label class="switch"><input type="checkbox" id="autoRestart"><span class="slider"></span></label>
     </div>
+    
     <div class="row" style="margin-top: 10px;">
       <span>跳过片尾</span>
       <div class="control-group">
@@ -87,12 +116,14 @@
         <input type="number" id="outroTime" min="0" placeholder="秒">
       </div>
     </div>
+    
     <div class="row">
       <span>直接切下一集</span>
       <label class="switch"><input type="checkbox" id="autoPlayNext"><span class="slider"></span></label>
     </div>
+    
     <div class="row" style="margin-top: 10px; color: #ff6600;">
-      <span>短视频保护(秒)</span>
+      <span>短视频保护</span>
       <input type="number" id="minDuration" min="0">
     </div>
   </div>
