@@ -3,27 +3,34 @@
 <head>
   <meta charset="UTF-8">
   <style>
-    body { width: 260px; padding: 15px; font-family: "Segoe UI", sans-serif; color: #333; }
+    body { width: 270px; padding: 15px; font-family: "Segoe UI", sans-serif; color: #333; }
     h3 { margin: 0 0 10px 0; color: #00aeec; font-size: 16px; border-bottom: 2px solid #f1f2f3; padding-bottom: 8px; display: flex; justify-content: space-between; align-items: center;}
     
-    /* 通用布局 */
     .section { margin-bottom: 12px; }
     .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 13px; height: 28px; }
     
-    /* 预设区域样式 (新) */
-    .preset-box { background: #f7f9fa; padding: 10px; border-radius: 6px; border: 1px solid #eee; margin-bottom: 15px; }
-    .preset-controls { display: flex; gap: 5px; margin-top: 5px; }
-    select { flex-grow: 1; padding: 4px; border: 1px solid #ddd; border-radius: 4px; outline: none; }
-    .btn-small { padding: 4px 8px; font-size: 12px; cursor: pointer; border: 1px solid #ddd; background: white; border-radius: 4px; }
-    .btn-small:hover { background: #eef; color: #00aeec; border-color: #00aeec; }
-    .btn-add { color: green; font-weight: bold; }
-    .btn-del { color: red; font-weight: bold; }
+    /* 预设区域样式 */
+    .preset-box { background: #f0f7ff; padding: 10px; border-radius: 6px; border: 1px solid #cce4ff; margin-bottom: 15px; }
+    .preset-controls { display: flex; gap: 5px; margin-top: 8px; }
+    
+    select { width: 100%; padding: 4px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 5px; outline: none; }
+    
+    /* 新增：域名输入框样式 */
+    .domain-input { 
+      width: 100%; padding: 5px; margin-bottom: 5px; 
+      border: 1px solid #ddd; border-radius: 4px; font-size: 12px; 
+      background: #fff;
+    }
+    .domain-input::placeholder { color: #999; }
 
-    /* 输入框与开关 */
+    .btn-small { padding: 4px 10px; font-size: 12px; cursor: pointer; border: 1px solid #ddd; background: white; border-radius: 4px; flex-grow: 1;}
+    .btn-small:hover { background: #eef; color: #00aeec; border-color: #00aeec; }
+    .btn-add { background: #eaffea; color: green; border-color: #ccffcc; }
+    .btn-del { background: #ffeaea; color: red; border-color: #ffcccc; flex-grow: 0; width: 30px;}
+
+    /* 其他通用样式保持不变 */
     input[type="number"] { width: 50px; padding: 4px; text-align: center; border: 1px solid #ddd; border-radius: 4px; }
     .key-input { width: 110px; padding: 4px 8px; font-size: 12px; text-align: right; border: 1px solid #ddd; border-radius: 4px; background: #fafafa; cursor: pointer; color: #555; }
-    
-    /* 开关 */
     .switch { position: relative; display: inline-block; width: 32px; height: 18px; margin-right: 5px; }
     .switch input { opacity: 0; width: 0; height: 0; }
     .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 20px; }
@@ -31,41 +38,37 @@
     input:checked + .slider { background-color: #00aeec; }
     input:checked + .slider:before { transform: translateX(14px); }
     .control-group { display: flex; align-items: center; }
-
-    /* 底部大按钮 */
     .btn-main { width: 100%; padding: 8px; background-color: #00aeec; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-top: 5px; }
     .btn-main:hover { background-color: #009cd6; }
-    
     #status { margin-top: 8px; font-size: 12px; color: green; text-align: center; height: 16px; }
     hr { border:0; border-top:1px solid #eee; margin:10px 0; }
   </style>
 </head>
 <body>
-  <h3>⚡ 跳略助手 Ultimate</h3>
+  <h3>⚡ 跳略助手 Auto</h3>
 
   <div class="preset-box">
-    <div style="font-size: 12px; color: #666; margin-bottom: 4px;">📁 快捷方案调取</div>
+    <div style="font-size: 12px; color: #0078d4; margin-bottom: 5px; font-weight: bold;">📁 智能预设方案</div>
+    
     <select id="presetSelect">
-      <option value="">-- 选择预设 --</option>
+      <option value="">-- 选择或新建 --</option>
     </select>
+    
+    <input type="text" id="domainMatch" class="domain-input" placeholder="自动匹配关键词 (如: bilibili)">
+    
     <div class="preset-controls">
-      <button id="applyPresetBtn" class="btn-small" style="flex-grow: 1;">应用选中方案</button>
-      <button id="addPresetBtn" class="btn-small btn-add" title="保存当前设置为新预设">+</button>
-      <button id="delPresetBtn" class="btn-small btn-del" title="删除选中预设">-</button>
+      <button id="applyPresetBtn" class="btn-small">读取</button>
+      <button id="addPresetBtn" class="btn-small btn-add">保存/更新</button>
+      <button id="delPresetBtn" class="btn-small btn-del" title="删除预设">×</button>
     </div>
   </div>
 
   <div class="section">
     <div class="row">
-      <span style="font-weight: bold;">启用自动跳过(总)</span>
-      <label class="switch">
-        <input type="checkbox" id="autoSkipEnable">
-        <span class="slider"></span>
-      </label>
+      <span style="font-weight: bold;">启用自动跳过</span>
+      <label class="switch"><input type="checkbox" id="autoSkipEnable"><span class="slider"></span></label>
     </div>
-    
     <hr>
-
     <div class="row">
       <span>跳过片头</span>
       <div class="control-group">
@@ -73,12 +76,10 @@
         <input type="number" id="introTime" min="0" placeholder="秒">
       </div>
     </div>
-
     <div class="row">
       <span style="font-size: 12px; color: #666;">↳ 完播自动重置</span>
       <label class="switch"><input type="checkbox" id="autoRestart"><span class="slider"></span></label>
     </div>
-
     <div class="row" style="margin-top: 10px;">
       <span>跳过片尾</span>
       <div class="control-group">
@@ -86,12 +87,10 @@
         <input type="number" id="outroTime" min="0" placeholder="秒">
       </div>
     </div>
-
     <div class="row">
       <span>直接切下一集</span>
       <label class="switch"><input type="checkbox" id="autoPlayNext"><span class="slider"></span></label>
     </div>
-
     <div class="row" style="margin-top: 10px; color: #ff6600;">
       <span>短视频保护(秒)</span>
       <input type="number" id="minDuration" min="0">
@@ -115,7 +114,7 @@
     </div>
   </div>
 
-  <button id="saveBtn" class="btn-main">保存配置</button>
+  <button id="saveBtn" class="btn-main">保存当前配置</button>
   <div id="status"></div>
   <script src="popup.js"></script>
 </body>

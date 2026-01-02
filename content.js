@@ -1,5 +1,5 @@
 // =========================================================
-// Bilibili Skipper Ultimate (Safe Landing Fix)
+// Bilibili Skipper Ultimate (Auto Domain Match)
 // =========================================================
 
 if (window.hasBiliSkipperLoaded) {
@@ -19,10 +19,79 @@ let config = {
     minDuration: 300,
     autoPlayNext: false,
     keyForward: { code: 'ArrowRight', shift: true, ctrl: false, alt: false },
-    keyRewind: { code: 'ArrowLeft', shift: true, ctrl: false, alt: false }
+    keyRewind: { code: 'ArrowLeft', shift: true, ctrl: false, alt: false },
+    savedPresets: [] // 存储预设列表
 };
 
 let isSwitchingEpisode = false;
+
+// --- 初始化 ---
+chrome.storage.local.get(config, (items) => {
+    config = { ...config, ...items };
+    
+    // 1. 【核心逻辑】执行自动网址匹配
+    checkAndApplyAutoMatch();
+
+    // 2. 启动功能
+    document.addEventListener('keydown', onKeyHandler);
+    if (!window.biliMonitorInterval) {
+        startMonitoring();
+    }
+});
+
+chrome.storage.onChanged.addListener((changes) => {
+    for (let key in changes) {
+        if (config.hasOwnProperty(key)) {
+            config[key] = changes[key].newValue;
+        }
+    }
+});
+
+// --- 新增：自动匹配函数 ---
+function checkAndApplyAutoMatch() {
+    // 必须有预设才匹配
+    if (!config.savedPresets || config.savedPresets.length === 0) return;
+
+    const currentUrl = window.location.href;
+    
+    // 寻找匹配项 (只要 URL 包含 domain 关键词即可)
+    // 注意：如果有多个匹配，取第一个找到的
+    const matchedPreset = config.savedPresets.find(p => p.domain && p.domain.trim() !== "" && currentUrl.includes(p.domain));
+
+    if (matchedPreset) {
+        console.log("Skipper: 检测到域名匹配 ->", matchedPreset.name);
+        
+        // 覆盖当前内存中的配置
+        config.introTime = matchedPreset.intro;
+        config.outroTime = matchedPreset.outro;
+        config.autoRestart = matchedPreset.restart;
+        config.autoPlayNext = matchedPreset.next;
+        config.enableIntro = (matchedPreset.intro > 0);
+        config.enableOutro = (matchedPreset.outro > 0);
+        // 如果你希望自动匹配时也开启总开关，解开下面这行注释
+        // config.autoSkipEnable = true; 
+
+        // 提示用户
+        // 稍微延迟一点显示，让用户注意到
+        setTimeout(() => {
+            showToast(`🤖 已自动应用: ${matchedPreset.name}`);
+        }, 1000);
+
+        // 【可选】是否将自动匹配的结果写回硬盘？
+        // 写回的好处：点开插件图标时，看到的界面就是匹配后的状态
+        // 坏处：会覆盖掉你之前的全局设置
+        // 建议：写回。因为用户既然打开了这个网站，就希望插件处于这个状态。
+        chrome.storage.local.set({
+            introTime: matchedPreset.intro,
+            outroTime: matchedPreset.outro,
+            autoRestart: matchedPreset.restart,
+            autoPlayNext: matchedPreset.next,
+            enableIntro: (matchedPreset.intro > 0),
+            enableOutro: (matchedPreset.outro > 0)
+        });
+    }
+}
+
 
 // --- 辅助函数 ---
 function findMainVideo() {
@@ -63,23 +132,6 @@ function tryClickNext() {
     return false;
 }
 
-// --- 初始化 ---
-chrome.storage.local.get(config, (items) => {
-    config = { ...config, ...items };
-    document.addEventListener('keydown', onKeyHandler);
-    if (!window.biliMonitorInterval) {
-        startMonitoring();
-    }
-});
-
-chrome.storage.onChanged.addListener((changes) => {
-    for (let key in changes) {
-        if (config.hasOwnProperty(key)) {
-            config[key] = changes[key].newValue;
-        }
-    }
-});
-
 // --- 键盘快捷键 ---
 function onKeyHandler(event) {
     const isForward = isKeyMatch(event, config.keyForward);
@@ -105,7 +157,7 @@ function onKeyHandler(event) {
 let hasSkippedIntro = false;
 let hasTriggeredRestart = false; 
 let videoLoadStartTime = 0;      
-let restartCooldownTime = 0; // 新增：重置后的冷却时间戳
+let restartCooldownTime = 0;
 
 function startMonitoring() {
     window.biliMonitorInterval = setInterval(() => {
@@ -120,7 +172,7 @@ function startMonitoring() {
                 isSwitchingEpisode = false; 
                 hasTriggeredRestart = false; 
                 videoLoadStartTime = Date.now(); 
-                restartCooldownTime = 0; // 重置冷却
+                restartCooldownTime = 0; 
             };
             
             video.addEventListener('loadedmetadata', resetState);
@@ -145,50 +197,39 @@ function handleTimeUpdate(e) {
     // 2. 短视频保护
     if (video.duration < config.minDuration) return; 
 
-    // --- 【逻辑 A】完播重置 (Safe Landing) ---
+    // --- 完播重置 (Safe Landing) ---
     if (config.autoRestart === true && !hasTriggeredRestart) {
-        // 在视频加载前4秒内持续检测
         if (Date.now() - videoLoadStartTime < 4000) {
             const timeLeft = video.duration - video.currentTime;
             
-            // 如果处于片尾
             if (timeLeft < 30 || video.currentTime / video.duration > 0.95) {
                 console.log("Skipper: 触发完播重置...");
 
-                // >>> 安全计算核心 <<<
-                // 1. 计算片尾触发线
                 const outroTriggerTime = video.duration - (config.enableOutro ? config.outroTime : 0);
-                // 2. 计算理想的重置位置 (片头结束处)
                 let targetPos = config.enableIntro ? config.introTime : 0;
 
-                // 3. 碰撞检测：如果 理想位置 >= 片尾触发线，说明会撞车
                 if (targetPos >= outroTriggerTime) {
-                    console.log("Skipper: 片头片尾重叠，强制重置到 0秒");
-                    targetPos = 0; // 强制降落到 0秒
+                    targetPos = 0;
                 }
 
                 video.currentTime = targetPos;
                 showToast(`↺ 已重置到 ${targetPos}秒`);
                 
-                // 标记状态
                 hasTriggeredRestart = true;
                 hasSkippedIntro = true;
-                // 设置5秒的无敌时间：这5秒内禁止检测片尾，防止B站进度条回弹误判
                 restartCooldownTime = Date.now() + 5000; 
             }
         }
     }
 
-    // --- 【逻辑 B】跳过片头 ---
+    // --- 跳过片头 ---
     const outroTriggerTime = video.duration - (config.enableOutro ? config.outroTime : 0);
     const targetIntroTime = config.introTime;
     const isOverlap = targetIntroTime >= outroTriggerTime;
 
     if (config.enableIntro === true && !isOverlap) { 
         if (video.currentTime < targetIntroTime && !hasSkippedIntro && video.currentTime > 0.5) {
-             // 如果在无敌时间内，不要乱动（虽然这里通常是跳去同一个地方，但为了稳定）
              if (Date.now() < restartCooldownTime) {
-                 // 仅仅标记为已跳过，不做动作
                  hasSkippedIntro = true; 
              } else if (targetIntroTime < video.duration) {
                 video.currentTime = targetIntroTime;
@@ -198,17 +239,13 @@ function handleTimeUpdate(e) {
         }
     }
 
-    // --- 【逻辑 C】跳过片尾 ---
+    // --- 跳过片尾 ---
     if (config.enableOutro === true) {
-        // 如果当前处于“重置后的无敌时间”内，直接跳过片尾检测！
-        // 这就是解决“直接下一集”的关键
         if (Date.now() < restartCooldownTime) return;
 
         if (config.outroTime > 0) {
             if (video.currentTime > outroTriggerTime && video.currentTime < video.duration) {
-                // 加载保护：刚加载页面的4秒内如果不重置，也不跳片尾
                 if (Date.now() - videoLoadStartTime < 4000 && !hasTriggeredRestart) return;
-
                 if (isSwitchingEpisode) return;
 
                 if (config.autoPlayNext === true) {
