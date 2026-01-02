@@ -3,78 +3,113 @@
 <head>
   <meta charset="UTF-8">
   <style>
-    body { width: 230px; padding: 15px; font-family: "Segoe UI", sans-serif; color: #333; }
+    body { width: 250px; padding: 15px; font-family: "Segoe UI", sans-serif; color: #333; }
     h3 { margin: 0 0 15px 0; color: #00aeec; font-size: 16px; border-bottom: 2px solid #f1f2f3; padding-bottom: 8px;}
     
     .section { margin-bottom: 15px; }
-    .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 13px;}
+    /* Flex布局，让开关和输入框在一行排好 */
+    .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 13px; height: 28px; }
     
+    /* 基础输入框 */
     input[type="number"] { width: 50px; padding: 4px; text-align: center; border: 1px solid #ddd; border-radius: 4px; }
     
-    /* 开关通用样式 */
-    .switch { position: relative; display: inline-block; width: 36px; height: 20px; }
+    /* 按键录制输入框 */
+    .key-input { 
+      width: 110px; padding: 4px 8px; font-size: 12px; text-align: right; 
+      border: 1px solid #ddd; border-radius: 4px; background: #fafafa; cursor: pointer; color: #555;
+    }
+    .key-input:focus { border-color: #00aeec; background: white; outline: none; }
+    
+    /* 开关样式 (稍微缩小一点以适应单行) */
+    .switch { position: relative; display: inline-block; width: 32px; height: 18px; margin-right: 5px; }
     .switch input { opacity: 0; width: 0; height: 0; }
     .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 20px; }
-    .slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+    .slider:before { position: absolute; content: ""; height: 12px; width: 12px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
     input:checked + .slider { background-color: #00aeec; }
-    input:checked + .slider:before { transform: translateX(16px); }
+    input:checked + .slider:before { transform: translateX(14px); }
+
+    /* 组合控件区域 */
+    .control-group { display: flex; align-items: center; }
 
     button { 
       width: 100%; padding: 8px; background-color: #00aeec; color: white; 
-      border: none; border-radius: 4px; cursor: pointer; font-weight: bold;
+      border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-top: 5px;
     }
     button:hover { background-color: #009cd6; }
     #status { margin-top: 8px; font-size: 12px; color: green; text-align: center; height: 16px; }
-    .hint { font-size: 11px; color: #888; margin-top: -5px; margin-bottom: 10px; }
+    .hint { font-size: 11px; color: #888; margin-top: -3px; margin-bottom: 8px; }
+    
+    hr { border:0; border-top:1px solid #eee; margin:12px 0; }
   </style>
 </head>
 <body>
-  <h3>⚡ B站跳略助手 Ultimate</h3>
+  <h3>⚡ B站跳略助手 Pro</h3>
 
   <div class="section">
     <div class="row">
-      <span><b>启用自动跳过</b></span>
+      <span style="font-weight: bold;">启用自动跳过(总)</span>
       <label class="switch">
         <input type="checkbox" id="autoSkipEnable">
         <span class="slider"></span>
       </label>
     </div>
     
+    <hr>
+
     <div class="row">
-      <span>跳过片头 (秒)</span>
-      <input type="number" id="introTime" min="0">
-    </div>
-    <div class="row">
-      <span>跳过片尾 (秒)</span>
-      <input type="number" id="outroTime" min="0">
+      <span>跳过片头</span>
+      <div class="control-group">
+        <label class="switch" title="开启片头跳过">
+          <input type="checkbox" id="enableIntro">
+          <span class="slider"></span>
+        </label>
+        <input type="number" id="introTime" min="0" placeholder="秒">
+      </div>
     </div>
 
     <div class="row">
-      <span>触发下一集</span>
-      <label class="switch">
+      <span>跳过片尾</span>
+      <div class="control-group">
+        <label class="switch" title="开启片尾跳过">
+          <input type="checkbox" id="enableOutro">
+          <span class="slider"></span>
+        </label>
+        <input type="number" id="outroTime" min="0" placeholder="秒">
+      </div>
+    </div>
+
+    <div class="row">
+      <span>直接切下一集</span>
+      <label class="switch" title="跳过片尾时直接点击下一集">
         <input type="checkbox" id="autoPlayNext">
         <span class="slider"></span>
       </label>
     </div>
-    <div class="hint">跳过片尾时直接点击"下一集"</div>
 
     <div class="row" style="margin-top: 10px; color: #ff6600;">
-      <span>短视频保护 (秒)</span>
-      <input type="number" id="minDuration" min="0" placeholder="0">
+      <span>短视频保护(秒)</span>
+      <input type="number" id="minDuration" min="0">
     </div>
-    <div class="hint">视频总长小于此值时不自动跳过</div>
   </div>
 
-  <hr style="border:0; border-top:1px solid #eee; margin:10px 0;">
+  <hr>
 
   <div class="section">
     <div class="row">
-      <span>Shift+箭头跨度</span>
+      <span>跨度 (秒)</span>
       <input type="number" id="manualSkipTime" min="1">
+    </div>
+    <div class="row">
+      <span>快进键</span>
+      <input type="text" id="keyForward" class="key-input" placeholder="点击录入" readonly>
+    </div>
+    <div class="row">
+      <span>快退键</span>
+      <input type="text" id="keyRewind" class="key-input" placeholder="点击录入" readonly>
     </div>
   </div>
 
-  <button id="saveBtn">保存全部设置</button>
+  <button id="saveBtn">保存配置</button>
   <div id="status"></div>
   <script src="popup.js"></script>
 </body>
