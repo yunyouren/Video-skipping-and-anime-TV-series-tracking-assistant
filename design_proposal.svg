@@ -1,0 +1,8 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- 背景：Bilibili 粉色圆角矩形 -->
+  <rect x="0" y="0" width="128" height="128" rx="28" fill="#FB7299"/>
+  
+  <!-- 图标：白色双箭头，代表跳过/快进 -->
+  <path d="M36 34 L66 64 L36 94" stroke="white" stroke-width="14" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M72 34 L102 64 L72 94" stroke="white" stroke-width="14" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
