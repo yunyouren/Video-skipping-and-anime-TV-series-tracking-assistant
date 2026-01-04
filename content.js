@@ -1,5 +1,5 @@
 // =========================================================
-// Bilibili Skipper Ultimate (Resume Fix)
+// Bilibili Skipper Ultimate (Auto Apply Switch)
 // =========================================================
 
 if (window.hasBiliSkipperLoaded) {
@@ -14,6 +14,10 @@ let config = {
     enableOutro: true,
     autoRestart: false,
     autoUpdateFav: true,
+    
+    // 新增开关
+    autoApplyPreset: true,
+
     introTime: 90,
     outroTime: 0,
     manualSkipTime: 90,
@@ -27,49 +31,16 @@ let config = {
 
 let isSwitchingEpisode = false;
 
-// --- 辅助：生成带进度的 URL ---
-function getResumeUrl(video) {
-    let url = window.location.href;
-    const time = Math.floor(video.currentTime);
-    
-    // 1. B站：添加 &t=xxx
-    if (url.includes("bilibili.com")) {
-        // 先清除旧的 t 参数
-        url = url.replace(/[\?&]t=\d+/, "");
-        const separator = url.includes("?") ? "&" : "?";
-        return `${url}${separator}t=${time}`;
-    }
-    
-    // 2. YouTube：添加 &t=xxx
-    if (url.includes("youtube.com") || url.includes("youtu.be")) {
-        url = url.replace(/[\?&]t=\d+s?/, "");
-        const separator = url.includes("?") ? "&" : "?";
-        return `${url}${separator}t=${time}`;
-    }
-
-    // 3. 其他网站：通常不支持 URL 跳转进度，直接返回当前 URL
-    return url;
-}
-
 // --- 消息监听 ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    
-    // 主Frame: 返回干净的标题和URL
     if (request.action === "getNiceTitle") {
         const info = parseVideoInfo(); 
-        sendResponse({
-            series: info.seriesName,
-            episode: info.episodeName,
-            url: window.location.href // 主Frame的URL才是真正的网页地址
-        });
+        sendResponse({ series: info.seriesName, episode: info.episodeName, url: window.location.href });
         return true;
     }
-
-    // 视频Frame: 返回进度数据
     if (request.action === "getRequestVideoInfo") {
         const video = findMainVideo();
         if (!video) return; 
-
         try {
             const info = parseVideoInfo();
             const data = {
@@ -77,8 +48,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 series: info.seriesName, 
                 episode: info.episodeName,     
                 site: info.siteName,
-                // 使用生成的带进度 URL
-                url: getResumeUrl(video), 
+                url: getResumeUrl(video),
                 time: Math.floor(video.currentTime),
                 duration: Math.floor(video.duration || 0),
                 timestamp: Date.now()
@@ -110,7 +80,11 @@ chrome.storage.onChanged.addListener((changes) => {
     }
 });
 
+// --- 【核心修改】增加开关判断 ---
 function checkAndApplyAutoMatch() {
+    // 如果用户关闭了自动应用，直接退出
+    if (!config.autoApplyPreset) return;
+
     if (!config.savedPresets || config.savedPresets.length === 0) return;
     const currentUrl = window.location.href;
     const currentTitle = document.title; 
@@ -120,16 +94,35 @@ function checkAndApplyAutoMatch() {
         return currentUrl.includes(keyword) || currentTitle.includes(keyword);
     });
     if (matchedPreset) {
+        console.log("Skipper: 自动匹配预设 ->", matchedPreset.name);
         config.introTime = matchedPreset.intro;
         config.outroTime = matchedPreset.outro;
         config.autoRestart = matchedPreset.restart;
         config.autoPlayNext = matchedPreset.next;
         config.enableIntro = (matchedPreset.intro > 0);
         config.enableOutro = (matchedPreset.outro > 0);
+        // 这里只是更新内存中的 config，如果需要持久化覆盖，可以解开下行注释
+        // chrome.storage.local.set({ introTime: ..., ... });
     }
 }
 
 // --- 辅助函数 ---
+function getResumeUrl(video) {
+    let url = window.location.href;
+    const time = Math.floor(video.currentTime);
+    if (url.includes("bilibili.com")) {
+        url = url.replace(/[\?&]t=\d+/, "");
+        const separator = url.includes("?") ? "&" : "?";
+        return `${url}${separator}t=${time}`;
+    }
+    if (url.includes("youtube.com") || url.includes("youtu.be")) {
+        url = url.replace(/[\?&]t=\d+s?/, "");
+        const separator = url.includes("?") ? "&" : "?";
+        return `${url}${separator}t=${time}`;
+    }
+    return url;
+}
+
 function findMainVideo() {
     const videos = Array.from(document.querySelectorAll('video'));
     if (videos.length === 0) return null;
@@ -304,7 +297,7 @@ function autoUpdateFavorites(video) {
                 series: sName,
                 episode: info.episodeName,
                 site: info.siteName,
-                url: getResumeUrl(video), // 【修改】使用带进度的URL
+                url: getResumeUrl(video),
                 time: Math.floor(video.currentTime),
                 duration: Math.floor(video.duration || 0),
                 timestamp: now

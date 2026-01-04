@@ -1,6 +1,5 @@
 // popup.js
 
-// ... (前半部分保持不变，直到 addFavBtn 监听器) ...
 const defaultKeys = {
     forward: { code: 'ArrowRight', shift: true, ctrl: false, alt: false, keyName: 'Shift + →' },
     rewind: { code: 'ArrowLeft', shift: true, ctrl: false, alt: false, keyName: 'Shift + ←' }
@@ -24,6 +23,10 @@ document.addEventListener('DOMContentLoaded', () => {
         enableOutro: true,
         autoRestart: false,
         autoUpdateFav: true,
+        
+        // 新增：自动应用匹配开关 (默认开启)
+        autoApplyPreset: true,
+
         introTime: 90,
         outroTime: 0,
         manualSkipTime: 90,
@@ -37,7 +40,10 @@ document.addEventListener('DOMContentLoaded', () => {
         loadConfigToUI(items);
         currentPresets = items.savedPresets;
         currentFavorites = items.favorites;
+        
         document.getElementById('autoUpdateFav').checked = items.autoUpdateFav;
+        document.getElementById('autoApplyPreset').checked = items.autoApplyPreset; // 回显
+
         renderPresetDropdown();
         renderFavoritesList();
         tempKeyForward = items.keyForward;
@@ -48,47 +54,30 @@ document.addEventListener('DOMContentLoaded', () => {
     setupKeyRecorder('keyRewind', (keyData) => { tempKeyRewind = keyData; });
 });
 
+// 监听两个自动开关
 document.getElementById('autoUpdateFav').addEventListener('change', (e) => {
     chrome.storage.local.set({ autoUpdateFav: e.target.checked });
 });
+document.getElementById('autoApplyPreset').addEventListener('change', (e) => {
+    chrome.storage.local.set({ autoApplyPreset: e.target.checked });
+});
 
-// --- ⭐ 收藏按钮 (核心修正) ---
+// --- 收藏逻辑 (无变化) ---
 document.getElementById('addFavBtn').addEventListener('click', () => {
     chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
         if (tabs.length === 0) return;
-        
-        // 1. 先问主页面要标题和URL
         chrome.tabs.sendMessage(tabs[0].id, { action: "getNiceTitle" }, { frameId: 0 }, (titleResponse) => {
-            
-            // 2. 再问所有Frame要视频进度
             chrome.tabs.sendMessage(tabs[0].id, { action: "getRequestVideoInfo" }, (videoResponse) => {
-                
-                if (chrome.runtime.lastError) { /* 忽略 */ }
-
-                if (!videoResponse) {
-                    showFloatingToast("❌ 失败：未检测到视频");
-                    return;
-                }
+                if (chrome.runtime.lastError) { }
+                if (!videoResponse) { showFloatingToast("❌ 失败：未检测到视频"); return; }
 
                 let finalData = videoResponse;
-
-                // 【关键修正】优先使用主页面的信息
                 if (titleResponse) {
-                    console.log("使用主页面信息修正");
-                    
-                    // 1. 修正标题
                     if (titleResponse.series && titleResponse.series !== "樱花动漫") {
                         finalData.series = titleResponse.series;
-                        if (finalData.episode === "观看中" && titleResponse.episode) {
-                            finalData.episode = titleResponse.episode;
-                        }
+                        if (finalData.episode === "观看中" && titleResponse.episode) finalData.episode = titleResponse.episode;
                     }
-
-                    // 2. 【核心】修正URL：如果主页面有URL，绝对优先使用主页面的
-                    // 这样就不会存下 iframe 的垃圾地址了
-                    if (titleResponse.url) {
-                        finalData.url = titleResponse.url;
-                    }
+                    if (titleResponse.url) finalData.url = titleResponse.url;
                 }
 
                 currentFavorites[finalData.series] = finalData;
@@ -101,7 +90,6 @@ document.getElementById('addFavBtn').addEventListener('click', () => {
     });
 });
 
-// --- 弹窗函数 ---
 function showFloatingToast(msg) {
     let toast = document.getElementById('my-toast');
     if (!toast) {
@@ -114,8 +102,6 @@ function showFloatingToast(msg) {
     toast.classList.add('show');
     setTimeout(() => { toast.classList.remove('show'); }, 2000);
 }
-
-// ... (以下函数保持不变) ...
 
 function renderFavoritesList() {
     const listDiv = document.getElementById('favList');
@@ -148,7 +134,7 @@ function renderFavoritesList() {
         });
         div.querySelector('.fav-del').addEventListener('click', (e) => {
             e.stopPropagation();
-            if (confirm(`不再追 "${item.series}" 了吗?`)) {
+            if (confirm(`删除 "${item.series}"?`)) {
                 delete currentFavorites[item.series];
                 chrome.storage.local.set({ favorites: currentFavorites });
                 renderFavoritesList();
@@ -274,7 +260,11 @@ document.getElementById('saveBtn').addEventListener('click', () => {
         minDuration: parseInt(document.getElementById('minDuration').value) || 0,
         keyForward: tempKeyForward || defaultKeys.forward,
         keyRewind: tempKeyRewind || defaultKeys.rewind,
+        
+        // 记得保存两个开关
         autoUpdateFav: document.getElementById('autoUpdateFav').checked,
+        autoApplyPreset: document.getElementById('autoApplyPreset').checked,
+
         savedPresets: currentPresets,
         favorites: currentFavorites
     };
