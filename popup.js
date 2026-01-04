@@ -23,9 +23,10 @@ document.addEventListener('DOMContentLoaded', () => {
         enableOutro: true,
         autoRestart: false,
         autoUpdateFav: true,
-        
-        // 新增：自动应用匹配开关 (默认开启)
         autoApplyPreset: true,
+        
+        // 新增：读取最后一次激活的方案名 (由 content.js 写入)
+        lastActivePreset: "",
 
         introTime: 90,
         outroTime: 0,
@@ -42,7 +43,16 @@ document.addEventListener('DOMContentLoaded', () => {
         currentFavorites = items.favorites;
         
         document.getElementById('autoUpdateFav').checked = items.autoUpdateFav;
-        document.getElementById('autoApplyPreset').checked = items.autoApplyPreset; // 回显
+        document.getElementById('autoApplyPreset').checked = items.autoApplyPreset;
+
+        // 显示当前匹配的方案名
+        const activeNameLabel = document.getElementById('activePresetName');
+        if (items.lastActivePreset && items.autoApplyPreset) {
+            activeNameLabel.textContent = `已激活: ${items.lastActivePreset}`;
+            activeNameLabel.style.display = 'inline-block';
+        } else {
+            activeNameLabel.style.display = 'none';
+        }
 
         renderPresetDropdown();
         renderFavoritesList();
@@ -54,15 +64,11 @@ document.addEventListener('DOMContentLoaded', () => {
     setupKeyRecorder('keyRewind', (keyData) => { tempKeyRewind = keyData; });
 });
 
-// 监听两个自动开关
-document.getElementById('autoUpdateFav').addEventListener('change', (e) => {
-    chrome.storage.local.set({ autoUpdateFav: e.target.checked });
-});
-document.getElementById('autoApplyPreset').addEventListener('change', (e) => {
-    chrome.storage.local.set({ autoApplyPreset: e.target.checked });
-});
+// ... (其他逻辑保持不变，确保完整性) ...
 
-// --- 收藏逻辑 (无变化) ---
+document.getElementById('autoUpdateFav').addEventListener('change', (e) => { chrome.storage.local.set({ autoUpdateFav: e.target.checked }); });
+document.getElementById('autoApplyPreset').addEventListener('change', (e) => { chrome.storage.local.set({ autoApplyPreset: e.target.checked }); });
+
 document.getElementById('addFavBtn').addEventListener('click', () => {
     chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
         if (tabs.length === 0) return;
@@ -70,7 +76,6 @@ document.getElementById('addFavBtn').addEventListener('click', () => {
             chrome.tabs.sendMessage(tabs[0].id, { action: "getRequestVideoInfo" }, (videoResponse) => {
                 if (chrome.runtime.lastError) { }
                 if (!videoResponse) { showFloatingToast("❌ 失败：未检测到视频"); return; }
-
                 let finalData = videoResponse;
                 if (titleResponse) {
                     if (titleResponse.series && titleResponse.series !== "樱花动漫") {
@@ -79,7 +84,6 @@ document.getElementById('addFavBtn').addEventListener('click', () => {
                     }
                     if (titleResponse.url) finalData.url = titleResponse.url;
                 }
-
                 currentFavorites[finalData.series] = finalData;
                 chrome.storage.local.set({ favorites: currentFavorites }, () => {
                     renderFavoritesList();
@@ -260,10 +264,9 @@ document.getElementById('saveBtn').addEventListener('click', () => {
         minDuration: parseInt(document.getElementById('minDuration').value) || 0,
         keyForward: tempKeyForward || defaultKeys.forward,
         keyRewind: tempKeyRewind || defaultKeys.rewind,
-        
-        // 记得保存两个开关
         autoUpdateFav: document.getElementById('autoUpdateFav').checked,
-        autoApplyPreset: document.getElementById('autoApplyPreset').checked,
+        
+        autoApplyPreset: document.getElementById('autoApplyPreset').checked, // 保存开关
 
         savedPresets: currentPresets,
         favorites: currentFavorites

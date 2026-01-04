@@ -9,7 +9,7 @@
     .section { margin-bottom: 12px; }
     .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 13px; height: 28px; }
     
-    /* 收藏夹与预设通用样式 */
+    /* 容器样式 */
     .box-container { 
       background: #fff; border: 1px solid #eee; border-radius: 6px; 
       margin-bottom: 15px; overflow: hidden;
@@ -19,6 +19,13 @@
       display: flex; justify-content: space-between; align-items: center;
     }
     .box-header.blue { background: #f0f7ff; color: #0078d4; border-bottom: 1px solid #cce4ff; }
+
+    /* 新增：匹配状态显示 */
+    #activePresetName {
+      font-weight: normal; font-size: 11px; color: #00aeec; 
+      background: rgba(255,255,255,0.6); padding: 1px 6px; border-radius: 4px;
+      display: none; /* 默认隐藏，有匹配才显示 */
+    }
 
     .controls-row {
       background: #fafafa; padding: 5px 10px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;
@@ -45,7 +52,6 @@
     .preset-controls { display: flex; gap: 5px; margin-top: 8px; }
     select { width: 100%; padding: 4px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 5px; outline: none; }
     .domain-input { width: 100%; padding: 5px; margin-bottom: 5px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; background: #fff; box-sizing: border-box;}
-    
     .btn-small { padding: 4px 10px; font-size: 12px; cursor: pointer; border: 1px solid #ddd; background: white; border-radius: 4px; flex-grow: 1;}
     .btn-small:hover { background: #eef; color: #00aeec; border-color: #00aeec; }
     .btn-add { background: #eaffea; color: green; border-color: #ccffcc; }
@@ -54,14 +60,12 @@
     input[type="number"] { width: 50px; padding: 4px; text-align: center; border: 1px solid #ddd; border-radius: 4px; }
     .key-input { width: 110px; padding: 4px 8px; font-size: 12px; text-align: right; border: 1px solid #ddd; border-radius: 4px; background: #fafafa; cursor: pointer; color: #555; }
     
-    /* 开关 */
     .switch { position: relative; display: inline-block; width: 32px; height: 18px; margin-right: 5px; }
     .switch input { opacity: 0; width: 0; height: 0; }
     .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 20px; }
     .slider:before { position: absolute; content: ""; height: 12px; width: 12px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
     input:checked + .slider { background-color: #00aeec; }
     input:checked + .slider:before { transform: translateX(14px); }
-    /* 迷你开关 */
     .switch.mini { width: 26px; height: 14px; margin-right: 0; }
     .switch.mini .slider:before { height: 10px; width: 10px; left: 2px; bottom: 2px; }
     .switch.mini input:checked + .slider:before { transform: translateX(12px); }
@@ -72,15 +76,12 @@
     #status { margin-top: 8px; font-size: 12px; color: green; text-align: center; height: 16px; }
     hr { border:0; border-top:1px solid #eee; margin:10px 0; }
 
-    /* 弹窗 */
     .toast-popup {
       position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
       background: rgba(0, 0, 0, 0.85); color: white; padding: 15px 20px;
       border-radius: 8px; font-size: 13px; text-align: center;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-      z-index: 999; pointer-events: none;
-      opacity: 0; transition: opacity 0.3s;
-      width: 70%; line-height: 1.5;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 999; pointer-events: none;
+      opacity: 0; transition: opacity 0.3s; width: 70%; line-height: 1.5;
     }
     .toast-popup.show { opacity: 1; }
   </style>
@@ -97,17 +98,16 @@
       <span class="ctrl-label">🔄 自动更新进度</span>
       <label class="switch mini"><input type="checkbox" id="autoUpdateFav"><span class="slider"></span></label>
     </div>
-    <div id="favList">
-      <div style="padding:15px; text-align:center; color:#999; font-size:12px;">暂无收藏</div>
-    </div>
+    <div id="favList"><div style="padding:15px; text-align:center; color:#999; font-size:12px;">暂无收藏</div></div>
   </div>
 
   <div class="box-container">
     <div class="box-header blue">
       <span>📁 方案与匹配</span>
+      <span id="activePresetName"></span>
     </div>
     <div class="controls-row">
-      <span class="ctrl-label" title="检测到匹配网址/标题时自动切换方案">⚡ 自动应用匹配方案</span>
+      <span class="ctrl-label" title="匹配成功自动开启，不匹配自动关闭">⚡ 自动开关与应用</span>
       <label class="switch mini"><input type="checkbox" id="autoApplyPreset"><span class="slider"></span></label>
     </div>
     <div class="preset-body">
@@ -124,48 +124,19 @@
   <div class="section">
     <div class="row"><span style="font-weight: bold;">启用自动跳过</span><label class="switch"><input type="checkbox" id="autoSkipEnable"><span class="slider"></span></label></div>
     <hr>
-    
-    <div class="row">
-      <span>跳过片头</span>
-      <div class="control-group"><label class="switch"><input type="checkbox" id="enableIntro"><span class="slider"></span></label><input type="number" id="introTime" min="0" placeholder="秒"></div>
-    </div>
-    
-    <div class="row">
-      <span style="font-size: 12px; color: #666;">↳ 完播自动重置</span>
-      <label class="switch"><input type="checkbox" id="autoRestart"><span class="slider"></span></label>
-    </div>
-    
-    <div class="row" style="margin-top: 10px;">
-      <span>跳过片尾</span>
-      <div class="control-group"><label class="switch"><input type="checkbox" id="enableOutro"><span class="slider"></span></label><input type="number" id="outroTime" min="0" placeholder="秒"></div>
-    </div>
-    
-    <div class="row">
-      <span>直接切下一集</span>
-      <label class="switch"><input type="checkbox" id="autoPlayNext"><span class="slider"></span></label>
-    </div>
-    
-    <div class="row" style="margin-top: 10px; color: #ff6600;">
-      <span>短视频保护 (秒)</span>
-      <input type="number" id="minDuration" min="0">
-    </div>
+    <div class="row"><span>跳过片头</span><div class="control-group"><label class="switch"><input type="checkbox" id="enableIntro"><span class="slider"></span></label><input type="number" id="introTime" min="0" placeholder="秒"></div></div>
+    <div class="row"><span style="font-size: 12px; color: #666;">↳ 完播自动重置</span><label class="switch"><input type="checkbox" id="autoRestart"><span class="slider"></span></label></div>
+    <div class="row" style="margin-top: 10px;"><span>跳过片尾</span><div class="control-group"><label class="switch"><input type="checkbox" id="enableOutro"><span class="slider"></span></label><input type="number" id="outroTime" min="0" placeholder="秒"></div></div>
+    <div class="row"><span>直接切下一集</span><label class="switch"><input type="checkbox" id="autoPlayNext"><span class="slider"></span></label></div>
+    <div class="row" style="margin-top: 10px; color: #ff6600;"><span>短视频保护 (秒)</span><input type="number" id="minDuration" min="0"></div>
   </div>
 
   <hr>
 
   <div class="section">
-    <div class="row">
-      <span>快进/退 (秒)</span>
-      <input type="number" id="manualSkipTime" min="1">
-    </div>
-    <div class="row">
-      <span>快进键</span>
-      <input type="text" id="keyForward" class="key-input" readonly>
-    </div>
-    <div class="row">
-      <span>快退键</span>
-      <input type="text" id="keyRewind" class="key-input" readonly>
-    </div>
+    <div class="row"><span>快进/退 (秒)</span><input type="number" id="manualSkipTime" min="1"></div>
+    <div class="row"><span>快进键</span><input type="text" id="keyForward" class="key-input" readonly></div>
+    <div class="row"><span>快退键</span><input type="text" id="keyRewind" class="key-input" readonly></div>
   </div>
 
   <button id="saveBtn" class="btn-main">保存当前配置</button>

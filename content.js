@@ -1,5 +1,5 @@
 // =========================================================
-// Bilibili Skipper Ultimate (Auto Apply Switch)
+// Bilibili Skipper Ultimate (Auto Enable/Disable)
 // =========================================================
 
 if (window.hasBiliSkipperLoaded) {
@@ -14,8 +14,6 @@ let config = {
     enableOutro: true,
     autoRestart: false,
     autoUpdateFav: true,
-    
-    // 新增开关
     autoApplyPreset: true,
 
     introTime: 90,
@@ -67,7 +65,9 @@ chrome.storage.local.get(config, (items) => {
     if (!config.keyForward || !config.keyForward.code) config.keyForward = { code: 'ArrowRight', shift: true, ctrl: false, alt: false };
     if (!config.keyRewind || !config.keyRewind.code) config.keyRewind = { code: 'ArrowLeft', shift: true, ctrl: false, alt: false };
 
+    // 页面加载时执行一次匹配
     checkAndApplyAutoMatch();
+
     window.addEventListener('keydown', onKeyHandler, true);
     if (!window.biliMonitorInterval) startMonitoring();
 });
@@ -80,29 +80,62 @@ chrome.storage.onChanged.addListener((changes) => {
     }
 });
 
-// --- 【核心修改】增加开关判断 ---
+// --- 【核心修改】自动匹配与开关控制 ---
 function checkAndApplyAutoMatch() {
-    // 如果用户关闭了自动应用，直接退出
+    // 1. 如果用户关了自动应用，直接退出（不做任何改变）
     if (!config.autoApplyPreset) return;
 
     if (!config.savedPresets || config.savedPresets.length === 0) return;
+    
     const currentUrl = window.location.href;
     const currentTitle = document.title; 
+
+    // 2. 寻找匹配项
     const matchedPreset = config.savedPresets.find(p => {
         if (!p.domain || p.domain.trim() === "") return false;
         const keyword = p.domain.trim();
         return currentUrl.includes(keyword) || currentTitle.includes(keyword);
     });
+
     if (matchedPreset) {
-        console.log("Skipper: 自动匹配预设 ->", matchedPreset.name);
+        // --- 匹配成功：自动开启并应用 ---
+        console.log("Skipper: 匹配成功 ->", matchedPreset.name);
+        
+        // 更新内存配置
+        config.autoSkipEnable = true; // 强制开启
         config.introTime = matchedPreset.intro;
         config.outroTime = matchedPreset.outro;
         config.autoRestart = matchedPreset.restart;
         config.autoPlayNext = matchedPreset.next;
         config.enableIntro = (matchedPreset.intro > 0);
         config.enableOutro = (matchedPreset.outro > 0);
-        // 这里只是更新内存中的 config，如果需要持久化覆盖，可以解开下行注释
-        // chrome.storage.local.set({ introTime: ..., ... });
+
+        // 持久化保存 (让Popup能看到变化)
+        chrome.storage.local.set({
+            autoSkipEnable: true,
+            introTime: matchedPreset.intro,
+            outroTime: matchedPreset.outro,
+            autoRestart: matchedPreset.restart,
+            autoPlayNext: matchedPreset.next,
+            enableIntro: (matchedPreset.intro > 0),
+            enableOutro: (matchedPreset.outro > 0),
+            lastActivePreset: matchedPreset.name // 记录名字供Popup显示
+        });
+
+        showToast(`⚡ 已激活方案: ${matchedPreset.name}`);
+
+    } else {
+        // --- 匹配失败：自动关闭 ---
+        // 只有当之前是开启状态时，才去关闭它，避免重复写入
+        if (config.autoSkipEnable === true) {
+            console.log("Skipper: 无匹配方案，自动关闭");
+            config.autoSkipEnable = false;
+            
+            chrome.storage.local.set({
+                autoSkipEnable: false,
+                lastActivePreset: "" // 清空显示
+            });
+        }
     }
 }
 
@@ -142,6 +175,7 @@ function isKeyMatch(event, keyConfig) {
     if (keyConfig.code === 'ArrowRight' && (code === 'ArrowRight' || event.key === 'ArrowRight')) {}
     else if (keyConfig.code === 'ArrowLeft' && (code === 'ArrowLeft' || event.key === 'ArrowLeft')) {}
     else if (code !== keyConfig.code) return false;
+
     if (event.shiftKey !== (keyConfig.shift || false)) return false;
     if (event.ctrlKey !== (keyConfig.ctrl || false)) return false;
     if (event.altKey !== (keyConfig.alt || false)) return false;
