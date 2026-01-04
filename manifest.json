@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "全能视频跳略助手",
+  "name": "视频跳略助手",
   "version": "3.0",
   "description": "智能跳过片头片尾，支持追番收藏与快捷键控制。",
   "icons": {
