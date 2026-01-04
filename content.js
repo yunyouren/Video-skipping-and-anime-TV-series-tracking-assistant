@@ -1,5 +1,5 @@
 // =========================================================
-// Bilibili Skipper Ultimate (Iframe Fix)
+// Bilibili Skipper Ultimate (Resume Fix)
 // =========================================================
 
 if (window.hasBiliSkipperLoaded) {
@@ -27,37 +27,58 @@ let config = {
 
 let isSwitchingEpisode = false;
 
-// --- 消息监听 (核心修改) ---
+// --- 辅助：生成带进度的 URL ---
+function getResumeUrl(video) {
+    let url = window.location.href;
+    const time = Math.floor(video.currentTime);
+    
+    // 1. B站：添加 &t=xxx
+    if (url.includes("bilibili.com")) {
+        // 先清除旧的 t 参数
+        url = url.replace(/[\?&]t=\d+/, "");
+        const separator = url.includes("?") ? "&" : "?";
+        return `${url}${separator}t=${time}`;
+    }
+    
+    // 2. YouTube：添加 &t=xxx
+    if (url.includes("youtube.com") || url.includes("youtu.be")) {
+        url = url.replace(/[\?&]t=\d+s?/, "");
+        const separator = url.includes("?") ? "&" : "?";
+        return `${url}${separator}t=${time}`;
+    }
+
+    // 3. 其他网站：通常不支持 URL 跳转进度，直接返回当前 URL
+    return url;
+}
+
+// --- 消息监听 ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     
-    // 指令1: 仅获取页面标题 (用于主Frame)
+    // 主Frame: 返回干净的标题和URL
     if (request.action === "getNiceTitle") {
-        const info = parseVideoInfo(); // 尝试解析
+        const info = parseVideoInfo(); 
         sendResponse({
             series: info.seriesName,
             episode: info.episodeName,
-            url: window.location.href
+            url: window.location.href // 主Frame的URL才是真正的网页地址
         });
         return true;
     }
 
-    // 指令2: 获取视频进度 (用于播放器Frame)
+    // 视频Frame: 返回进度数据
     if (request.action === "getRequestVideoInfo") {
         const video = findMainVideo();
-        // 如果当前Frame没有视频，直接忽略，不返回任何东西
-        // 这样Popup就不会收到错误的"无视频"响应
         if (!video) return; 
 
         try {
-            // 尽力解析一下当前Frame的标题(可能是错误的)
             const info = parseVideoInfo();
             const data = {
-                // 标记一下：如果是播放器iframe，标题往往很短或者包含"播放器"
                 isIframe: (window.self !== window.top),
                 series: info.seriesName, 
                 episode: info.episodeName,     
                 site: info.siteName,
-                url: window.location.href,
+                // 使用生成的带进度 URL
+                url: getResumeUrl(video), 
                 time: Math.floor(video.currentTime),
                 duration: Math.floor(video.duration || 0),
                 timestamp: Date.now()
@@ -73,7 +94,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // --- 初始化 ---
 chrome.storage.local.get(config, (items) => {
     config = { ...config, ...items };
-    // 默认按键保护
     if (!config.keyForward || !config.keyForward.code) config.keyForward = { code: 'ArrowRight', shift: true, ctrl: false, alt: false };
     if (!config.keyRewind || !config.keyRewind.code) config.keyRewind = { code: 'ArrowLeft', shift: true, ctrl: false, alt: false };
 
@@ -139,8 +159,7 @@ function tryClickNext() {
     const selectors = [
         '.bpx-player-ctrl-next', '.squirtle-video-next', 
         '.bilibili-player-video-btn-next', '[aria-label="下一个"]', 
-        '.switch-btn.next', '#multi_page .cur + li a',
-        '.nxt', '.next' 
+        '.switch-btn.next', '#multi_page .cur + li a', '.nxt', '.next' 
     ];
     for (const sel of selectors) {
         const btn = document.querySelector(sel);
@@ -171,16 +190,11 @@ function onKeyHandler(event) {
     event.stopImmediatePropagation();
 }
 
-// --- 智能信息提取 (针对樱花动漫优化) ---
 function parseVideoInfo() {
     let rawTitle = document.title.trim();
     const url = window.location.href;
-    
-    // 尝试寻找 H1 标签 (樱花动漫通常在 H1 里写了真名)
-    // 即使在 iframe 里找不到，如果是主Frame调用这个函数就能找到了
     const h1 = document.querySelector('h1');
     if (h1 && h1.innerText.length > 2) {
-        // 如果 H1 看起来像个标题，优先使用 H1
         rawTitle = h1.innerText.trim() + " " + rawTitle; 
     }
 
@@ -202,8 +216,8 @@ function parseVideoInfo() {
         .replace(/_在线观看.*/i, "")
         .replace(/_高清.*/i, "")
         .replace(/_NT动漫.*/i, "")
-        .replace(/樱花动漫.*/i, "") // 去掉樱花后缀
-        .replace(/播放器.*/i, "")   // 去掉播放器字样
+        .replace(/樱花动漫.*/i, "") 
+        .replace(/播放器.*/i, "")   
         .trim();
 
     cleanTitle = cleanTitle.replace(/[《》]/g, "");
@@ -282,16 +296,6 @@ function autoUpdateFavorites(video) {
     if (now - lastFavUpdateTime < 10000) return;
     if (video.currentTime < 10) return;
 
-    // 自动更新时，因为没法跨Frame询问标题，所以这里有个局限：
-    // 如果你在iframe里自动更新，可能还是会更新成"播放器"这个名字
-    // **但是**，我们的逻辑是：必须 Favorites 里已经有这个 Key 才会更新。
-    // 如果你第一次手动收藏是正确的名字，那么 Key 就是正确的名字。
-    // 这里我们只要能匹配上 Key 就能更新。
-    // 
-    // 难点：iframe 里解析出来的 seriesName 可能是 "播放器"，跟 Favorites 里的 "海贼王" 对不上。
-    // 解决：自动更新功能在 iframe 网站上可能受限，这是技术硬伤。
-    // 补救：只有当 seriesName 在收藏里存在时才更新。如果 iframe 解析出来是乱码，就不会误更新。
-    
     try {
         const info = parseVideoInfo();
         const sName = info.seriesName;
@@ -300,7 +304,7 @@ function autoUpdateFavorites(video) {
                 series: sName,
                 episode: info.episodeName,
                 site: info.siteName,
-                url: window.location.href,
+                url: getResumeUrl(video), // 【修改】使用带进度的URL
                 time: Math.floor(video.currentTime),
                 duration: Math.floor(video.duration || 0),
                 timestamp: now

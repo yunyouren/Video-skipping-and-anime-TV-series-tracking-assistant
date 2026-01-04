@@ -1,5 +1,6 @@
 // popup.js
 
+// ... (前半部分保持不变，直到 addFavBtn 监听器) ...
 const defaultKeys = {
     forward: { code: 'ArrowRight', shift: true, ctrl: false, alt: false, keyName: 'Shift + →' },
     rewind: { code: 'ArrowLeft', shift: true, ctrl: false, alt: false, keyName: 'Shift + ←' }
@@ -51,34 +52,48 @@ document.getElementById('autoUpdateFav').addEventListener('change', (e) => {
     chrome.storage.local.set({ autoUpdateFav: e.target.checked });
 });
 
-// --- ⭐ 核心修改：收藏按钮 ---
+// --- ⭐ 收藏按钮 (核心修正) ---
 document.getElementById('addFavBtn').addEventListener('click', () => {
     chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
         if (tabs.length === 0) return;
         
+        // 1. 先问主页面要标题和URL
         chrome.tabs.sendMessage(tabs[0].id, { action: "getNiceTitle" }, { frameId: 0 }, (titleResponse) => {
+            
+            // 2. 再问所有Frame要视频进度
             chrome.tabs.sendMessage(tabs[0].id, { action: "getRequestVideoInfo" }, (videoResponse) => {
                 
                 if (chrome.runtime.lastError) { /* 忽略 */ }
 
                 if (!videoResponse) {
-                    showFloatingToast("❌ 失败：未检测到视频"); // 使用新弹窗
+                    showFloatingToast("❌ 失败：未检测到视频");
                     return;
                 }
 
                 let finalData = videoResponse;
-                if (titleResponse && titleResponse.series && titleResponse.series !== "樱花动漫") {
-                    console.log("使用主页面标题修正:", titleResponse.series);
-                    finalData.series = titleResponse.series;
-                    if (finalData.episode === "观看中" && titleResponse.episode) {
-                        finalData.episode = titleResponse.episode;
+
+                // 【关键修正】优先使用主页面的信息
+                if (titleResponse) {
+                    console.log("使用主页面信息修正");
+                    
+                    // 1. 修正标题
+                    if (titleResponse.series && titleResponse.series !== "樱花动漫") {
+                        finalData.series = titleResponse.series;
+                        if (finalData.episode === "观看中" && titleResponse.episode) {
+                            finalData.episode = titleResponse.episode;
+                        }
+                    }
+
+                    // 2. 【核心】修正URL：如果主页面有URL，绝对优先使用主页面的
+                    // 这样就不会存下 iframe 的垃圾地址了
+                    if (titleResponse.url) {
+                        finalData.url = titleResponse.url;
                     }
                 }
 
                 currentFavorites[finalData.series] = finalData;
                 chrome.storage.local.set({ favorites: currentFavorites }, () => {
                     renderFavoritesList();
-                    // 使用新弹窗
                     showFloatingToast(`✅ 已收藏！\n${finalData.series}\n${finalData.episode}`);
                 });
             });
@@ -86,22 +101,18 @@ document.getElementById('addFavBtn').addEventListener('click', () => {
     });
 });
 
-// --- ⭐ 新增：漂浮弹窗函数 ---
+// --- 弹窗函数 ---
 function showFloatingToast(msg) {
     let toast = document.getElementById('my-toast');
     if (!toast) {
         toast = document.createElement('div');
         toast.id = 'my-toast';
-        toast.className = 'toast-popup'; // 对应 CSS 类
+        toast.className = 'toast-popup';
         document.body.appendChild(toast);
     }
     toast.innerText = msg;
     toast.classList.add('show');
-    
-    // 2秒后自动消失
-    setTimeout(() => {
-        toast.classList.remove('show');
-    }, 2000);
+    setTimeout(() => { toast.classList.remove('show'); }, 2000);
 }
 
 // ... (以下函数保持不变) ...
@@ -137,7 +148,7 @@ function renderFavoritesList() {
         });
         div.querySelector('.fav-del').addEventListener('click', (e) => {
             e.stopPropagation();
-            if (confirm(`删除 "${item.series}"?`)) {
+            if (confirm(`不再追 "${item.series}" 了吗?`)) {
                 delete currentFavorites[item.series];
                 chrome.storage.local.set({ favorites: currentFavorites });
                 renderFavoritesList();
