@@ -294,6 +294,7 @@ document.getElementById('addFavBtn').addEventListener('click', () => {
                         if (finalData.episode === "观看中" && titleResponse.episode) finalData.episode = titleResponse.episode;
                     }
                     if (titleResponse.url) finalData.url = titleResponse.url;
+                    if (titleResponse.site) finalData.site = titleResponse.site;
                 }
                 
                 const currentFolder = document.getElementById('folderSelect').value;

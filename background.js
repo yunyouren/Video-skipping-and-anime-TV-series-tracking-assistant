@@ -32,7 +32,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "getTabTitle") {
         // sender.tab.title 包含了顶层标签页的标题
         const title = sender.tab ? sender.tab.title : "";
-        sendResponse({ title: title });
+        const url = sender.tab ? sender.tab.url : "";
+        sendResponse({ title: title, url: url });
         return true; // 保持消息通道开启
     }
 });

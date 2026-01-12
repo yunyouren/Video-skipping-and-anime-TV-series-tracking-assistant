@@ -34,7 +34,7 @@ let lastCheckTime = 0;
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "getNiceTitle") {
         const info = parseVideoInfo(); 
-        sendResponse({ series: info.seriesName, episode: info.episodeName, url: window.location.href });
+        sendResponse({ series: info.seriesName, episode: info.episodeName, url: window.location.href, site: info.siteName });
         return true;
     }
     if (request.action === "getRequestVideoInfo") {
@@ -143,6 +143,10 @@ function checkAndApplyAutoMatch() {
 // --- 辅助函数 ---
 function getResumeUrl(video) {
     let url = window.location.href;
+    // 如果在 Iframe 中且成功获取了顶层 URL，优先使用顶层 URL
+    if (window.self !== window.top && cachedTopUrl) {
+        url = cachedTopUrl;
+    }
     const time = Math.floor(video.currentTime);
     if (url.includes("bilibili.com")) {
         url = url.replace(/[\?&]t=\d+/, "");
@@ -218,9 +222,9 @@ function onKeyHandler(event) {
     event.stopImmediatePropagation();
 }
 
-function parseVideoInfo(overrideTitle = null) {
+function parseVideoInfo(overrideTitle = null, overrideUrl = null) {
     let rawTitle = (overrideTitle || document.title).trim();
-    const url = window.location.href;
+    const url = overrideUrl || window.location.href;
     const h1 = document.querySelector('h1');
     if (h1 && h1.innerText.length > 2 && !overrideTitle) {
         rawTitle = h1.innerText.trim() + " " + rawTitle; 
@@ -290,6 +294,8 @@ let videoLoadStartTime = 0;
 let restartCooldownTime = 0;
 let lastFavUpdateTime = 0;
 let cachedTopTitle = null; // 缓存顶层标题 (解决 Iframe 无法获取标题问题)
+let cachedTopUrl = null;
+let isTopInfoReady = false; // 标记顶层信息是否已就绪
 
 function startMonitoring() {
     window.biliMonitorInterval = setInterval(() => {
@@ -297,13 +303,17 @@ function startMonitoring() {
         if (!video) return;
 
         // 如果在 Iframe 中且没有缓存过标题，尝试向 Background 获取顶层标题
-        if (window.self !== window.top && !cachedTopTitle) {
+        if (window.self !== window.top && (!cachedTopTitle || !cachedTopUrl)) {
              chrome.runtime.sendMessage({ action: "getTabTitle" }, (response) => {
-                 if (response && response.title) {
-                     cachedTopTitle = response.title;
-                     console.log("Skipper: 已获取顶层标题 ->", cachedTopTitle);
+                 if (response) {
+                     if (response.title) cachedTopTitle = response.title;
+                     if (response.url) cachedTopUrl = response.url;
+                     isTopInfoReady = true;
+                     console.log("Skipper: 已获取顶层信息 ->", cachedTopTitle, cachedTopUrl);
                  }
              });
+        } else if (window.self === window.top) {
+            isTopInfoReady = true; // 顶层页面无需等待
         }
 
         if (!video.dataset.hasSkipperListener) {
@@ -315,6 +325,18 @@ function startMonitoring() {
                 videoLoadStartTime = Date.now(); 
                 restartCooldownTime = 0; 
                 lastFavUpdateTime = 0; 
+                cachedTopTitle = null;
+                cachedTopUrl = null;
+                if (window.self !== window.top) isTopInfoReady = false; // Iframe 中重置就绪状态
+                
+                // 立即刷新一次顶层信息
+                chrome.runtime.sendMessage({ action: "getTabTitle" }, (response) => {
+                    if (response) {
+                        if (response.title) cachedTopTitle = response.title;
+                        if (response.url) cachedTopUrl = response.url;
+                        isTopInfoReady = true;
+                    }
+                });
                 setTimeout(checkAndApplyAutoMatch, 1000);
             };
             video.addEventListener('loadedmetadata', resetState);
@@ -331,13 +353,20 @@ function startMonitoring() {
 
 function autoUpdateFavorites(video) {
     if (!config.autoUpdateFav) return;
+
+    // 如果在 Iframe 中且尚未获取到顶层信息，坚决不更新，防止覆盖正确数据
+    if (window.self !== window.top && !isTopInfoReady) return;
+
+    // 如果在 Iframe 中且尚未获取到顶层 URL，我们尝试使用 existingItem.url 进行回退，而不是直接 return
+    // if (window.self !== window.top && !cachedTopUrl) return; // 移除之前的强硬拦截
+
     const now = Date.now();
     if (now - lastFavUpdateTime < 10000) return;
     if (video.currentTime < 10) return;
 
     try {
         // 如果有缓存的顶层标题 (Iframe 情况)，优先使用它进行解析
-        const info = parseVideoInfo(cachedTopTitle);
+        const info = parseVideoInfo(cachedTopTitle, cachedTopUrl);
         const sName = info.seriesName;
         
         // --- 修复：使用异步获取最新数据，防止覆盖 Popup 的修改 ---
@@ -351,13 +380,44 @@ function autoUpdateFavorites(video) {
             
             const existingItem = latestFavs[sName];
 
+            // --- URL 保护逻辑 ---
+            // 默认尝试获取当前 URL (可能会优先用 cachedTopUrl)
+            let finalUrl = getResumeUrl(video);
+            
+            // 如果我们在 Iframe 中，且没有获取到有效的 cachedTopUrl (或者 getResumeUrl 返回了 iframe 地址)
+            // 并且我们有已存在的有效 URL，则优先复用已存在的 URL，防止被 iframe 地址覆盖
+            if (window.self !== window.top) {
+                const isCachedUrlAvailable = !!cachedTopUrl;
+                
+                // 如果没有 cachedTopUrl，或者 finalUrl 看起来和 existingItem.url 域名差异巨大(简单判定)，则回退
+                if (!isCachedUrlAvailable && existingItem.url) {
+                    // 复用旧 URL，但需要更新时间参数
+                    let baseOldUrl = existingItem.url;
+                    
+                    // 清理旧的时间参数
+                    baseOldUrl = baseOldUrl.replace(/[\?&]t=\d+s?/, "").replace(/[\?&]t=\d+/, "");
+                    if (baseOldUrl.endsWith('?') || baseOldUrl.endsWith('&')) baseOldUrl = baseOldUrl.slice(0, -1);
+
+                    // 重新附加时间 (仅针对 B站/Youtube 等需要参数的站点，普通站点直接用 baseOldUrl)
+                    if (baseOldUrl.includes("bilibili.com") || baseOldUrl.includes("youtube.com") || baseOldUrl.includes("youtu.be")) {
+                         const separator = baseOldUrl.includes("?") ? "&" : "?";
+                         finalUrl = `${baseOldUrl}${separator}t=${Math.floor(video.currentTime)}`;
+                    } else {
+                         // 对于通用站点，通常不需要 t= 参数，直接使用原 URL
+                         finalUrl = baseOldUrl;
+                    }
+                    console.log("Skipper: Iframe 环境未获取到顶层URL，复用旧URL ->", finalUrl);
+                }
+            }
+
             // --- 优化：使用解构保留所有原有字段 (如 folder, notes 等) ---
             const newData = {
                 ...existingItem, // 保留原有的 folder 等属性
                 series: sName,
                 episode: info.episodeName,
-                site: info.siteName,
-                url: getResumeUrl(video),
+                // 优先使用已存在的 site 标签，防止自动更新时因环境问题导致标签变动 (如 樱花 -> Web)
+                site: existingItem.site || info.siteName,
+                url: finalUrl,
                 time: Math.floor(video.currentTime),
                 duration: Math.floor(video.duration || 0),
                 timestamp: now
