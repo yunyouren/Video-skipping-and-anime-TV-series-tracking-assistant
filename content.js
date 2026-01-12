@@ -2,6 +2,8 @@
 // Bilibili Skipper Ultimate (Auto Enable/Disable)
 // =========================================================
 
+(function() { // Start of IIFE
+
 if (window.hasBiliSkipperLoaded) {
     throw new Error("脚本已运行，跳过重复加载");
 }
@@ -383,8 +385,12 @@ function startMonitoring() {
 function autoUpdateFavorites(video) {
     if (!config.autoUpdateFav) return;
 
-    // 如果在 Iframe 中且尚未获取到顶层信息，坚决不更新，防止覆盖正确数据
-    if (window.self !== window.top && !isTopInfoReady) return;
+    // 降级策略：如果拿不到顶层信息，但我们确实在一个视频播放器里，且收藏夹里有该番剧名，则允许更新
+    if (window.self !== window.top && !isTopInfoReady) {
+         // 不直接 return，而是让后续逻辑去尝试匹配。
+         // 后续的 chrome.storage.local.get 会检查 items.favorites[sName]，如果匹配不上自然会退出。
+         console.warn("Skipper: 暂未获取顶层信息，尝试使用内部标题进行匹配更新...");
+    }
 
     // 如果在 Iframe 中且尚未获取到顶层 URL，我们尝试使用 existingItem.url 进行回退，而不是直接 return
     // if (window.self !== window.top && !cachedTopUrl) return; // 移除之前的强硬拦截
@@ -551,3 +557,5 @@ function showToast(text) {
     clearTimeout(toastTimeout);
     toastTimeout = setTimeout(() => { toast.style.opacity = '0'; }, 2000);
 }
+
+})(); // End of IIFE
