@@ -4,11 +4,15 @@
 chrome.runtime.onInstalled.addListener(() => {
     console.log("Bilibili Skipper 已安装/更新，正在注入脚本...");
 
-    // 查找所有符合条件的 Bilibili 视频标签页
+    // 查找所有符合条件的视频标签页 (包括 B站, 爱奇艺, 腾讯, 樱花等)
     chrome.tabs.query({
         url: [
             "*://*.bilibili.com/video/*",
-            "*://*.bilibili.com/bangumi/play/*"
+            "*://*.bilibili.com/bangumi/play/*",
+            "*://*.iqiyi.com/*",
+            "*://v.qq.com/*",
+            "*://*.yinghuacd.com/*",
+            "*://*.yhdmp.com/*" 
         ]
     }, (tabs) => {
         // 遍历每一个标签页，把 content.js 再次注入进去
@@ -22,7 +26,16 @@ chrome.runtime.onInstalled.addListener(() => {
         }
     });
 });
-// 监听浏览器标签页更新（比如用户在 YouTube 从一个视频点到另一个视频）
+// 监听来自 content.js 的消息
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    // 处理获取 Tab 标题的请求 (用于解决 Iframe 无法获取顶层标题导致自动更新失效的问题)
+    if (request.action === "getTabTitle") {
+        // sender.tab.title 包含了顶层标签页的标题
+        const title = sender.tab ? sender.tab.title : "";
+        sendResponse({ title: title });
+        return true; // 保持消息通道开启
+    }
+});
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     // 只有当页面加载完成 (complete) 且有 URL 时才尝试注入
     if (changeInfo.status === 'complete' && tab.url) {

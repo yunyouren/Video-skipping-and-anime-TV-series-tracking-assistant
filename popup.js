@@ -18,6 +18,7 @@ let tempKeyRewind = null;
 let currentPresets = [];
 let currentFavorites = {};
 let currentFolders = [];
+let targetMoveSeries = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.local.get({
@@ -106,7 +107,173 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     setupKeyRecorder('keyForward', (keyData) => { tempKeyForward = keyData; });
     setupKeyRecorder('keyRewind', (keyData) => { tempKeyRewind = keyData; });
+
+    document.getElementById('btnImport').addEventListener('click', () => {
+        document.getElementById('importInput').click();
+    });
+
+    document.getElementById('importInput').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const json = JSON.parse(event.target.result);
+                handleImport(json);
+            } catch (err) {
+                alert("❌ 文件格式错误");
+            }
+            e.target.value = '';
+        };
+        reader.readAsText(file);
+    });
+
+    const exportModal = document.getElementById('exportModal');
+
+    document.getElementById('btnOpenExportModal').addEventListener('click', () => {
+        const listDiv = document.getElementById('exportFolderList');
+        listDiv.innerHTML = '';
+
+        const selectAllDiv = document.createElement('div');
+        selectAllDiv.className = 'check-item';
+        selectAllDiv.style.borderBottom = '1px dashed #eee';
+        selectAllDiv.style.marginBottom = '5px';
+        selectAllDiv.style.paddingBottom = '5px';
+        selectAllDiv.innerHTML = `<label><input type="checkbox" id="checkAllFolders" checked> <strong>全选</strong></label>`;
+        listDiv.appendChild(selectAllDiv);
+
+        currentFolders.forEach(folder => {
+            const div = document.createElement('div');
+            div.className = 'check-item';
+            div.innerHTML = `<label><input type="checkbox" class="folder-chk" value="${folder}" checked> ${folder}</label>`;
+            listDiv.appendChild(div);
+        });
+
+        document.getElementById('checkAllFolders').addEventListener('change', (e) => {
+            const checkboxes = listDiv.querySelectorAll('.folder-chk');
+            checkboxes.forEach(cb => cb.checked = e.target.checked);
+        });
+
+        exportModal.style.display = 'flex';
+    });
+
+    document.getElementById('btnCancelExport').addEventListener('click', () => {
+        exportModal.style.display = 'none';
+    });
+
+    document.getElementById('btnConfirmExport').addEventListener('click', () => {
+        const checkboxes = document.querySelectorAll('.folder-chk:checked');
+        const selectedFolders = Array.from(checkboxes).map(cb => cb.value);
+
+        if (selectedFolders.length === 0) {
+            alert("请至少选择一个文件夹！");
+            return;
+        }
+
+        const filteredFavorites = {};
+        let count = 0;
+        
+        Object.values(currentFavorites).forEach(item => {
+            const itemFolder = item.folder || "默认收藏";
+            if (selectedFolders.includes(itemFolder)) {
+                filteredFavorites[item.series] = item;
+                count++;
+            }
+        });
+
+        if (count === 0) {
+            alert("选中的文件夹中没有番剧数据！");
+            return;
+        }
+
+        const exportData = {
+            version: "3.1",
+            timestamp: Date.now(),
+            dateStr: new Date().toLocaleString(),
+            folders: selectedFolders,
+            favorites: filteredFavorites
+        };
+
+        const date = new Date();
+        const dateStr = date.getFullYear() +
+                        (date.getMonth()+1).toString().padStart(2, '0') +
+                        date.getDate().toString().padStart(2, '0');
+        const nameSuffix = selectedFolders.length === 1 ? `-${selectedFolders[0]}` : '';
+        const filename = `skipper-backup${nameSuffix}-${dateStr}.json`;
+
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], {type: "application/json"});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        
+        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+
+        exportModal.style.display = 'none';
+        showFloatingToast(`✅ 已导出 ${count} 部番剧`);
+    });
+
+    let moveModal = document.getElementById('moveModal');
+    let moveSelect = document.getElementById('moveTargetSelect');
+
+    document.getElementById('btnCancelMove').addEventListener('click', () => {
+        moveModal.style.display = 'none';
+        targetMoveSeries = null;
+    });
+
+    document.getElementById('btnConfirmMove').addEventListener('click', () => {
+        if (!targetMoveSeries || !currentFavorites[targetMoveSeries]) return;
+        
+        const newFolder = moveSelect.value;
+        currentFavorites[targetMoveSeries].folder = newFolder;
+        
+        saveDataAndRender();
+        
+        moveModal.style.display = 'none';
+        targetMoveSeries = null;
+        
+        showFloatingToast(`✅ 已移动到 [${newFolder}]`);
+    });
+
+    chrome.storage.onChanged.addListener((changes, namespace) => {
+        if (namespace === 'local' && changes.favorites) {
+            currentFavorites = changes.favorites.newValue || {};
+            renderFavoritesList();
+        }
+    });
 });
+
+function handleImport(data) {
+    if (!data.favorites || !data.folders) {
+        alert("❌ 文件内容不完整，无法导入");
+        return;
+    }
+
+    const confirmMsg = `准备导入备份：\n📅 时间: ${data.dateStr || '未知时间'}\n📁 包含 ${Object.keys(data.favorites).length} 个番剧\n\n注意：同名番剧将被覆盖，新番剧将添加。是否继续？`;
+    
+    if (!confirm(confirmMsg)) return;
+
+    const newFoldersSet = new Set([...currentFolders, ...data.folders]);
+    currentFolders = Array.from(newFoldersSet);
+
+    currentFavorites = { ...currentFavorites, ...data.favorites };
+
+    for (let key in currentFavorites) {
+        if (!currentFavorites[key].folder) {
+            currentFavorites[key].folder = "默认收藏";
+        }
+    }
+
+    saveFolders();
+    saveDataAndRender();
+    
+    const currentSelect = document.getElementById('folderSelect').value;
+    renderFolderSelect(currentSelect);
+
+    showFloatingToast(`✅ 成功导入 ${Object.keys(data.favorites).length} 条记录`);
+}
 
 // ... (其他逻辑保持不变，确保完整性) ...
 
@@ -274,21 +441,51 @@ function renderFavoritesList() {
 
         div.querySelector('.btn-move').addEventListener('click', (e) => {
             e.stopPropagation();
-            const targetFolder = prompt("移动到哪个文件夹?\n(输入文件夹名称)", currentFolders.join(", "));
-            if (targetFolder) {
-                if (!currentFolders.includes(targetFolder)) {
-                    if(confirm(`文件夹 "${targetFolder}" 不存在，是否创建？`)){
-                        currentFolders.push(targetFolder);
+            
+            targetMoveSeries = item.series;
+            const moveSelect = document.getElementById('moveTargetSelect');
+            moveSelect.innerHTML = '';
+            
+            currentFolders.forEach(folder => {
+                const opt = document.createElement('option');
+                opt.value = folder;
+                opt.innerText = folder;
+                
+                if (folder === (item.folder || "默认收藏")) {
+                    opt.innerText += " (当前)";
+                    opt.selected = true; 
+                }
+                moveSelect.appendChild(opt);
+            });
+            
+            const newOpt = document.createElement('option');
+            newOpt.value = "__NEW__";
+            newOpt.innerText = "➕ 新建文件夹...";
+            newOpt.style.color = "#00aeec";
+            moveSelect.appendChild(newOpt);
+
+            moveSelect.onchange = function() {
+                if (this.value === "__NEW__") {
+                    const newName = prompt("请输入新文件夹名称:");
+                    if (newName && !currentFolders.includes(newName)) {
+                        currentFolders.push(newName);
                         saveFolders();
-                        renderFolderSelect();
+                        renderFolderSelect(); 
+                        
+                        const tempOpt = document.createElement('option');
+                        tempOpt.value = newName;
+                        tempOpt.innerText = newName;
+                        tempOpt.selected = true;
+                        moveSelect.insertBefore(tempOpt, newOpt);
+                        moveSelect.value = newName;
                     } else {
-                        return;
+                        moveSelect.value = item.folder || "默认收藏";
                     }
                 }
-                currentFavorites[item.series].folder = targetFolder;
-                saveDataAndRender();
-                showFloatingToast(`已移动到 ${targetFolder}`);
-            }
+            };
+
+            const moveModal = document.getElementById('moveModal');
+            moveModal.style.display = 'flex';
         });
 
         listDiv.appendChild(div);

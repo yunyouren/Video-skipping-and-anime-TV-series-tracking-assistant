@@ -218,11 +218,11 @@ function onKeyHandler(event) {
     event.stopImmediatePropagation();
 }
 
-function parseVideoInfo() {
-    let rawTitle = document.title.trim();
+function parseVideoInfo(overrideTitle = null) {
+    let rawTitle = (overrideTitle || document.title).trim();
     const url = window.location.href;
     const h1 = document.querySelector('h1');
-    if (h1 && h1.innerText.length > 2) {
+    if (h1 && h1.innerText.length > 2 && !overrideTitle) {
         rawTitle = h1.innerText.trim() + " " + rawTitle; 
     }
 
@@ -289,11 +289,22 @@ let hasTriggeredRestart = false;
 let videoLoadStartTime = 0;      
 let restartCooldownTime = 0;
 let lastFavUpdateTime = 0;
+let cachedTopTitle = null; // 缓存顶层标题 (解决 Iframe 无法获取标题问题)
 
 function startMonitoring() {
     window.biliMonitorInterval = setInterval(() => {
         const video = findMainVideo();
         if (!video) return;
+
+        // 如果在 Iframe 中且没有缓存过标题，尝试向 Background 获取顶层标题
+        if (window.self !== window.top && !cachedTopTitle) {
+             chrome.runtime.sendMessage({ action: "getTabTitle" }, (response) => {
+                 if (response && response.title) {
+                     cachedTopTitle = response.title;
+                     console.log("Skipper: 已获取顶层标题 ->", cachedTopTitle);
+                 }
+             });
+        }
 
         if (!video.dataset.hasSkipperListener) {
             video.addEventListener('timeupdate', handleTimeUpdate);
@@ -325,30 +336,42 @@ function autoUpdateFavorites(video) {
     if (video.currentTime < 10) return;
 
     try {
-        const info = parseVideoInfo();
+        // 如果有缓存的顶层标题 (Iframe 情况)，优先使用它进行解析
+        const info = parseVideoInfo(cachedTopTitle);
         const sName = info.seriesName;
         
-        let existingItem = {};
-        if (config.favorites && config.favorites[sName]) {
-            existingItem = config.favorites[sName];
-        }
+        // --- 修复：使用异步获取最新数据，防止覆盖 Popup 的修改 ---
+        chrome.storage.local.get({ favorites: {} }, (items) => {
+            const latestFavs = items.favorites || {};
+            
+            // 只有当番剧已经在收藏夹中时，才自动更新进度
+            if (!latestFavs[sName]) {
+                return;
+            }
+            
+            const existingItem = latestFavs[sName];
 
-        const newData = {
-            series: sName,
-            episode: info.episodeName,
-            site: info.siteName,
-            url: getResumeUrl(video),
-            time: Math.floor(video.currentTime),
-            duration: Math.floor(video.duration || 0),
-            timestamp: now,
-            folder: existingItem.folder || "默认收藏"
-        };
+            // --- 优化：使用解构保留所有原有字段 (如 folder, notes 等) ---
+            const newData = {
+                ...existingItem, // 保留原有的 folder 等属性
+                series: sName,
+                episode: info.episodeName,
+                site: info.siteName,
+                url: getResumeUrl(video),
+                time: Math.floor(video.currentTime),
+                duration: Math.floor(video.duration || 0),
+                timestamp: now
+            };
 
-        if (config.favorites) {
-            config.favorites[sName] = newData;
-            chrome.storage.local.set({ favorites: config.favorites });
+            latestFavs[sName] = newData;
+            
+            chrome.storage.local.set({ favorites: latestFavs });
+            
+            // 更新本地缓存，保持一致性
+            config.favorites = latestFavs;
             lastFavUpdateTime = now;
-        }
+        });
+
     } catch (e) { }
 }
 
