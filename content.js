@@ -24,7 +24,10 @@ let config = {
     keyForward: { code: 'ArrowRight', shift: true, ctrl: false, alt: false },
     keyRewind: { code: 'ArrowLeft', shift: true, ctrl: false, alt: false },
     savedPresets: [],
-    favorites: {}
+    favorites: {},
+    
+    // 【新增】
+    customTagRules: []
 };
 
 let isSwitchingEpisode = false;
@@ -224,7 +227,8 @@ function onKeyHandler(event) {
 
 function parseVideoInfo(overrideTitle = null, overrideUrl = null) {
     let rawTitle = (overrideTitle || document.title).trim();
-    const url = overrideUrl || window.location.href;
+    // 优先使用传入的 overrideUrl，其次尝试使用缓存的顶层 URL（如果存在），最后使用当前窗口 URL
+    const url = overrideUrl || cachedTopUrl || window.location.href;
     const h1 = document.querySelector('h1');
     if (h1 && h1.innerText.length > 2 && !overrideTitle) {
         rawTitle = h1.innerText.trim() + " " + rawTitle; 
@@ -232,11 +236,36 @@ function parseVideoInfo(overrideTitle = null, overrideUrl = null) {
 
     let seriesName = "";
     let episodeName = "";
-    let siteName = "Web";
+    
+    // ============ 【修改开始】 ============
+    let siteName = null; // 先不设默认值
 
-    if (url.includes("bilibili.com")) siteName = "B站";
-    else if (url.includes("iqiyi")) siteName = "爱奇艺";
-    else if (url.includes("yinghuacd") || rawTitle.includes("樱花")) siteName = "樱花";
+    // 1. 优先遍历用户自定义规则
+    // config.customTagRules 是从 storage 自动同步过来的
+    if (config.customTagRules && Array.isArray(config.customTagRules)) {
+        for (const rule of config.customTagRules) {
+            // 确保规则有效
+            if (rule.match && rule.name) {
+                // 检查 URL 或 标题 是否包含关键词
+                if (url.includes(rule.match) || rawTitle.includes(rule.match)) {
+                    siteName = rule.name;
+                    break; // 找到匹配项后立即停止，不再继续
+                }
+            }
+        }
+    }
+
+    // 2. 如果自定义规则没匹配到，再跑默认逻辑
+    if (!siteName) {
+        if (url.includes("bilibili.com")) siteName = "B站";
+        else if (url.includes("iqiyi")) siteName = "爱奇艺";
+        else if (url.includes("yinghuacd") || url.includes("yhdmp") || rawTitle.includes("樱花")) siteName = "樱花";
+        else if (url.includes("v.qq.com")) siteName = "腾讯";
+        else if (url.includes("youku")) siteName = "优酷";
+        else if (url.includes("mgtv")) siteName = "芒果";
+        else siteName = "Web"; // 最后的保底
+    }
+    // ============ 【修改结束】 ============
 
     let cleanTitle = rawTitle
         .replace(/_bilibili.*/i, "")

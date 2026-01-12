@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>视频跳略助手 - 设置</title>
+  <style>
+    :root {
+      --primary: #00aeec;
+      --sidebar-bg: #f7f9fa;
+      --border: #e1e4e8;
+      --text: #333;
+    }
+    body { 
+      font-family: "Segoe UI", sans-serif; 
+      color: var(--text); 
+      margin: 0; padding: 0; 
+      display: flex; 
+      height: 100vh; 
+      overflow: hidden;
+    }
+    
+    /* 侧边栏 */
+    .sidebar {
+      width: 240px;
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding-top: 20px;
+    }
+    .app-title {
+      padding: 0 20px 20px;
+      font-size: 18px;
+      font-weight: bold;
+      color: var(--primary);
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 10px;
+    }
+    .nav-item {
+      padding: 12px 20px;
+      cursor: pointer;
+      color: #555;
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      transition: background 0.2s;
+      font-size: 14px;
+    }
+    .nav-item:hover {
+      background: rgba(0,0,0,0.05);
+      color: #000;
+    }
+    .nav-item.active {
+      background: #e6f7ff;
+      color: var(--primary);
+      border-right: 3px solid var(--primary);
+    }
+    .nav-icon { margin-right: 10px; font-size: 16px; }
+
+    /* 主内容区 */
+    .main-content {
+      flex: 1;
+      padding: 30px 40px;
+      overflow-y: auto;
+      background: #fff;
+    }
+    
+    /* 页面切换逻辑 */
+    .page-section { display: none; }
+    .page-section.active { display: block; animation: fadeIn 0.3s; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+    h2 { margin-top: 0; padding-bottom: 15px; border-bottom: 1px solid #eee; font-size: 20px; }
+    
+    .card { background: #fff; padding: 20px; border: 1px solid #eee; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }
+    .desc { font-size: 13px; color: #666; margin-bottom: 15px; line-height: 1.6; }
+
+    .input-group { display: flex; gap: 10px; margin-bottom: 15px; }
+    input[type="text"] { padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; flex: 1; font-size: 13px; }
+    input:focus { border-color: var(--primary); outline: none; }
+    
+    button { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; transition: opacity 0.2s; }
+    .btn-primary { background: var(--primary); color: white; font-weight: 500; }
+    .btn-primary:hover { opacity: 0.9; }
+    .btn-danger { background: #fff1f0; color: #ff4d4f; border: 1px solid #ffa39e; }
+    .btn-danger:hover { background: #ffccc7; }
+
+    .rule-list { border: 1px solid #eee; border-radius: 4px; max-height: 500px; overflow-y: auto; background: #fafafa; }
+    .rule-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; border-bottom: 1px solid #eee; background: #fff; }
+    .rule-item:last-child { border-bottom: none; }
+    .rule-item:hover { background: #f0f7ff; }
+    
+    .tag-match { color: var(--primary); font-family: monospace; font-weight: bold; background: #e6f7ff; padding: 2px 6px; border-radius: 4px; }
+    .tag-arrow { color: #ccc; margin: 0 15px; }
+    .tag-name { font-weight: bold; color: #333; }
+
+    .empty-tip { padding: 40px; text-align: center; color: #999; font-size: 14px; }
+    
+    #toast { 
+      position: fixed; bottom: 30px; right: 30px; 
+      background: #333; color: #fff; padding: 10px 20px; 
+      border-radius: 4px; opacity: 0; transition: opacity 0.3s; 
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 100;
+    }
+    #toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+  <div class="sidebar">
+    <div class="app-title">⚡ 跳略助手</div>
+    <a href="#rules" class="nav-item active" data-target="rules">
+      <span class="nav-icon">🏷️</span> 站点标签规则
+    </a>
+    <a href="#about" class="nav-item" data-target="about">
+      <span class="nav-icon">ℹ️</span> 关于与帮助
+    </a>
+  </div>
+
+  <div class="main-content">
+    
+    <!-- 规则设置页 -->
+    <div id="page-rules" class="page-section active">
+      <h2>自定义站点标签 (Custom Tags)</h2>
+      <div class="card">
+        <div class="desc">
+          在这里配置域名或标题关键词，强制将视频识别为指定的站点标签。<br>
+          适用于解决 Iframe 播放器域名变动导致被识别为 "Web" 的问题。优先级高于内置规则。
+        </div>
+
+        <div class="input-group">
+          <input type="text" id="tagMatchInput" placeholder="匹配关键词 (例如: yhdmp 或 player.html)">
+          <input type="text" id="tagNameInput" placeholder="显示标签名 (例如: 樱花)">
+          <button id="btnAddRule" class="btn-primary">+ 添加规则</button>
+        </div>
+
+        <div class="rule-list" id="ruleListContainer">
+          <!-- 列表渲染区 -->
+        </div>
+      </div>
+    </div>
+
+    <!-- 关于页 -->
+    <div id="page-about" class="page-section">
+      <h2>关于与帮助</h2>
+      <div class="card">
+        <h3>配置说明</h3>
+        <div class="desc">
+          <ul>
+            <li><strong>关键词：</strong> 支持 URL 片段或页面标题片段。</li>
+            <li><strong>优先级：</strong> 用户规则 > 插件内置规则 > 默认 Web。</li>
+            <li><strong>生效方式：</strong> 添加或修改规则后，刷新视频页面即可生效。</li>
+          </ul>
+        </div>
+      </div>
+      <div class="card">
+        <div class="desc">
+          Version 3.1 <br>
+          © 2026 Bilibili Skipper
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div id="toast">已保存</div>
+
+  <script src="options.js"></script>
+</body>
+</html>

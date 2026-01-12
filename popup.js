@@ -41,8 +41,12 @@ document.addEventListener('DOMContentLoaded', () => {
         keyRewind: defaultKeys.rewind,
         savedPresets: defaultPresets,
         favorites: {},
-        favFolders: defaultFolders
+        favFolders: defaultFolders,
+        customTagRules: []
     }, (items) => {
+        // 优先初始化标签设置
+        try { setupTagSettings(items.customTagRules); } catch(e) { console.error("TagSettings Error:", e); }
+
         loadConfigToUI(items);
         currentPresets = items.savedPresets;
         currentFavorites = items.favorites;
@@ -643,4 +647,81 @@ function showTempMessage(msg, color = '#00aeec') {
         const isEnabled = document.getElementById('autoSkipEnable').checked;
         updateStatusText(isEnabled);
     }, 1500);
+}
+
+// 【新增】处理标签设置 UI
+function setupTagSettings(savedRules) {
+    let rules = savedRules || [];
+    const modal = document.getElementById('tagSettingsModal');
+    if (!modal) return; // 元素不存在则退出，防止报错
+
+    const listDiv = document.getElementById('tagRuleList');
+    const matchInput = document.getElementById('tagMatchInput');
+    const nameInput = document.getElementById('tagNameInput');
+    const btnOpen = document.getElementById('btnOpenTagModal');
+    const btnClose = document.getElementById('btnCloseTagModal');
+    const btnAdd = document.getElementById('btnAddTagRule');
+
+    if (!btnOpen || !btnClose || !btnAdd) return;
+
+    // 打开模态框
+    btnOpen.addEventListener('click', () => {
+        renderRules();
+        modal.style.display = 'flex';
+    });
+
+    // 关闭模态框
+    btnClose.addEventListener('click', () => {
+        modal.style.display = 'none';
+    });
+
+    // 添加规则
+    btnAdd.addEventListener('click', () => {
+        const match = matchInput.value.trim();
+        const name = nameInput.value.trim();
+        if (!match || !name) return alert("请填写完整关键词和标签名");
+        
+        rules.push({ match: match, name: name });
+        saveRules();
+        renderRules();
+        matchInput.value = '';
+        nameInput.value = '';
+    });
+
+    // 渲染列表
+    function renderRules() {
+        listDiv.innerHTML = '';
+        if (rules.length === 0) {
+            listDiv.innerHTML = '<div style="padding:10px; text-align:center; color:#ccc; font-size:11px;">暂无自定义规则</div>';
+            return;
+        }
+        rules.forEach((rule, index) => {
+            const div = document.createElement('div');
+            div.className = 'row';
+            div.style.padding = '4px 6px';
+            div.style.borderBottom = '1px solid #eee';
+            div.innerHTML = `
+                <span style="font-size:11px; color:#333;">
+                    <span style="color:#00aeec;">[${rule.match}]</span> ➔ <b>${rule.name}</b>
+                </span>
+                <button class="btn-del-rule" data-idx="${index}" style="border:none; background:none; color:red; cursor:pointer;">×</button>
+            `;
+            listDiv.appendChild(div);
+        });
+
+        // 绑定删除事件
+        document.querySelectorAll('.btn-del-rule').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const idx = e.target.dataset.idx;
+                rules.splice(idx, 1);
+                saveRules();
+                renderRules();
+            });
+        });
+    }
+
+    // 保存到 Storage
+    function saveRules() {
+        chrome.storage.local.set({ customTagRules: rules });
+    }
 }
