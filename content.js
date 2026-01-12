@@ -1,5 +1,5 @@
 // =========================================================
-// Bilibili Skipper Ultimate (The Black Tech Fix)
+// Bilibili Skipper Ultimate (Auto Enable/Disable)
 // =========================================================
 
 if (window.hasBiliSkipperLoaded) {
@@ -65,7 +65,9 @@ chrome.storage.local.get(config, (items) => {
     if (!config.keyForward || !config.keyForward.code) config.keyForward = { code: 'ArrowRight', shift: true, ctrl: false, alt: false };
     if (!config.keyRewind || !config.keyRewind.code) config.keyRewind = { code: 'ArrowLeft', shift: true, ctrl: false, alt: false };
 
+    // 页面加载时执行一次匹配
     checkAndApplyAutoMatch();
+
     window.addEventListener('keydown', onKeyHandler, true);
     if (!window.biliMonitorInterval) startMonitoring();
 });
@@ -78,12 +80,17 @@ chrome.storage.onChanged.addListener((changes) => {
     }
 });
 
+// --- 【核心修改】自动匹配与开关控制 ---
 function checkAndApplyAutoMatch() {
+    // 1. 如果用户关了自动应用，直接退出（不做任何改变）
     if (!config.autoApplyPreset) return;
+
     if (!config.savedPresets || config.savedPresets.length === 0) return;
     
     const currentUrl = window.location.href;
     const currentTitle = document.title; 
+
+    // 2. 寻找匹配项
     const matchedPreset = config.savedPresets.find(p => {
         if (!p.domain || p.domain.trim() === "") return false;
         const keyword = p.domain.trim();
@@ -91,33 +98,43 @@ function checkAndApplyAutoMatch() {
     });
 
     if (matchedPreset) {
-        if (!config.autoSkipEnable || config.lastActivePreset !== matchedPreset.name) {
-            console.log("Skipper: 匹配成功 ->", matchedPreset.name);
-            config.autoSkipEnable = true; 
-            config.introTime = matchedPreset.intro;
-            config.outroTime = matchedPreset.outro;
-            config.autoRestart = matchedPreset.restart;
-            config.autoPlayNext = matchedPreset.next;
-            config.enableIntro = (matchedPreset.intro > 0);
-            config.enableOutro = (matchedPreset.outro > 0);
+        // --- 匹配成功：自动开启并应用 ---
+        console.log("Skipper: 匹配成功 ->", matchedPreset.name);
+        
+        // 更新内存配置
+        config.autoSkipEnable = true; // 强制开启
+        config.introTime = matchedPreset.intro;
+        config.outroTime = matchedPreset.outro;
+        config.autoRestart = matchedPreset.restart;
+        config.autoPlayNext = matchedPreset.next;
+        config.enableIntro = (matchedPreset.intro > 0);
+        config.enableOutro = (matchedPreset.outro > 0);
+
+        // 持久化保存 (让Popup能看到变化)
+        chrome.storage.local.set({
+            autoSkipEnable: true,
+            introTime: matchedPreset.intro,
+            outroTime: matchedPreset.outro,
+            autoRestart: matchedPreset.restart,
+            autoPlayNext: matchedPreset.next,
+            enableIntro: (matchedPreset.intro > 0),
+            enableOutro: (matchedPreset.outro > 0),
+            lastActivePreset: matchedPreset.name // 记录名字供Popup显示
+        });
+
+        showToast(`⚡ 已激活方案: ${matchedPreset.name}`);
+
+    } else {
+        // --- 匹配失败：自动关闭 ---
+        // 只有当之前是开启状态时，才去关闭它，避免重复写入
+        if (config.autoSkipEnable === true) {
+            console.log("Skipper: 无匹配方案，自动关闭");
+            config.autoSkipEnable = false;
             
             chrome.storage.local.set({
-                autoSkipEnable: true,
-                introTime: matchedPreset.intro,
-                outroTime: matchedPreset.outro,
-                autoRestart: matchedPreset.restart,
-                autoPlayNext: matchedPreset.next,
-                enableIntro: (matchedPreset.intro > 0),
-                enableOutro: (matchedPreset.outro > 0),
-                lastActivePreset: matchedPreset.name
+                autoSkipEnable: false,
+                lastActivePreset: "" // 清空显示
             });
-            showToast(`⚡ 已激活方案: ${matchedPreset.name}`);
-        }
-    } else {
-        if (config.autoSkipEnable === true) {
-            console.log("Skipper: 无匹配，自动关闭");
-            config.autoSkipEnable = false;
-            chrome.storage.local.set({ autoSkipEnable: false, lastActivePreset: "" });
         }
     }
 }
@@ -158,6 +175,7 @@ function isKeyMatch(event, keyConfig) {
     if (keyConfig.code === 'ArrowRight' && (code === 'ArrowRight' || event.key === 'ArrowRight')) {}
     else if (keyConfig.code === 'ArrowLeft' && (code === 'ArrowLeft' || event.key === 'ArrowLeft')) {}
     else if (code !== keyConfig.code) return false;
+
     if (event.shiftKey !== (keyConfig.shift || false)) return false;
     if (event.ctrlKey !== (keyConfig.ctrl || false)) return false;
     if (event.altKey !== (keyConfig.alt || false)) return false;
@@ -299,7 +317,6 @@ function startMonitoring() {
     }, 1000);
 }
 
-// --- 【黑科技核心】模糊匹配更新 ---
 function autoUpdateFavorites(video) {
     if (!config.autoUpdateFav) return;
     const now = Date.now();
@@ -308,48 +325,13 @@ function autoUpdateFavorites(video) {
 
     try {
         const info = parseVideoInfo();
-        let sName = info.seriesName; // 解析出来的剧名 (可能是"播放器")
-        let targetFavorite = null;
-
-        // 策略A：名字直接匹配 (最理想)
+        const sName = info.seriesName;
         if (config.favorites && config.favorites[sName]) {
-            targetFavorite = config.favorites[sName];
-        } 
-        
-        // 策略B：黑科技 URL 匹配 (解决 Iframe 标题错误)
-        else if (config.favorites) {
-            // 获取来源页 URL (如果你在iframe里，这就是外层网页的地址)
-            // 如果不在iframe里，这个值可能为空或者就是当前页
-            const refUrl = document.referrer; 
-            
-            if (refUrl && refUrl.length > 10) {
-                // 遍历所有收藏，看看有没有哪个收藏的URL跟当前来源页长得像
-                // "长得像"的定义：URL的前80%是一样的
-                const allKeys = Object.keys(config.favorites);
-                for (const key of allKeys) {
-                    const savedUrl = config.favorites[key].url;
-                    if (savedUrl && areUrlsSimilar(savedUrl, refUrl)) {
-                        // 找到了！虽然当前标题叫"播放器"，但来源页URL跟收藏里的《海贼王》一样
-                        console.log(`Skipper黑科技: URL匹配成功! [${sName}] -> [${key}]`);
-                        sName = key; // 强行把名字纠正过来
-                        targetFavorite = config.favorites[key];
-                        break;
-                    }
-                }
-            }
-        }
-
-        // 如果找到了对应的收藏项，执行更新
-        if (targetFavorite) {
             const newData = {
-                series: sName, // 使用修正后的名字
-                episode: info.episodeName, // 集数通常在iframe里能提取到 (比如 url 包含 02.mp4)
-                site: targetFavorite.site, // 沿用原来的站点名
-                
-                // 关键：如果我们在iframe里，不要把iframe的垃圾url存进去
-                // 优先使用原来的url (如果是自动更新)，或者 document.referrer
-                url: document.referrer || targetFavorite.url || window.location.href,
-                
+                series: sName,
+                episode: info.episodeName,
+                site: info.siteName,
+                url: getResumeUrl(video),
                 time: Math.floor(video.currentTime),
                 duration: Math.floor(video.duration || 0),
                 timestamp: now
@@ -357,30 +339,8 @@ function autoUpdateFavorites(video) {
             config.favorites[sName] = newData;
             chrome.storage.local.set({ favorites: config.favorites });
             lastFavUpdateTime = now;
-            console.log(`✅ 自动更新: ${sName} ${newData.episode}`);
         }
-    } catch (e) { 
-        console.error("自动更新出错", e);
-    }
-}
-
-// 判断两个URL是否属于同一个系列
-function areUrlsSimilar(url1, url2) {
-    if (!url1 || !url2) return false;
-    // 去掉参数
-    const u1 = url1.split('?')[0];
-    const u2 = url2.split('?')[0];
-    
-    // 如果域名都不一样，肯定不是
-    if (new URL(u1).hostname !== new URL(u2).hostname) return false;
-
-    // 简单算法：去掉最后一段 (通常是集数id)，比较前面的部分
-    // 比如 .../play/123-1.html 和 .../play/123-2.html
-    const path1 = u1.substring(0, u1.lastIndexOf('/'));
-    const path2 = u2.substring(0, u2.lastIndexOf('/'));
-    
-    // 如果路径基本一致，或者是包含关系
-    return path1 === path2 || path1.includes(path2) || path2.includes(path1);
+    } catch (e) { }
 }
 
 function handleTimeUpdate(e) {
@@ -397,7 +357,6 @@ function handleTimeUpdate(e) {
                 const outroTriggerTime = video.duration - (config.enableOutro ? config.outroTime : 0);
                 let targetPos = config.enableIntro ? config.introTime : 0;
                 if (targetPos >= outroTriggerTime) { targetPos = 0; }
-                
                 video.currentTime = targetPos;
                 showToast(`↺ 已重置到 ${targetPos}秒`);
                 hasTriggeredRestart = true;
