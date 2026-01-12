@@ -183,7 +183,7 @@ function getResumeUrl(video) {
 }
 
 function findMainVideo() {
-    const videos = Array.from(document.querySelectorAll('video'));
+    const videos = findVideosInShadow(document);
     if (videos.length === 0) return null;
     if (videos.length === 1) return videos[0];
     const playingVideo = videos.find(v => !v.paused && v.duration > 10);
@@ -360,26 +360,49 @@ let cachedTopTitle = null; // 缓存顶层标题 (解决 Iframe 无法获取标�
 let cachedTopUrl = null;
 let isTopInfoReady = false; // 标记顶层信息是否已就绪
 
+// 【新增】视频信息缓存
+let cachedVideoInfo = null;
+let lastParseUrl = "";
+
 const processedVideos = new WeakSet();
 
-function startMonitoring() {
-    // 1. 首次运行：处理页面上已存在的 video
-    document.querySelectorAll('video').forEach(attachVideoListener);
-
-    // 2. 建立观察者：监听后续动态添加的 video
-    const observer = new MutationObserver((mutations) => {
-        for (const mutation of mutations) {
-            for (const node of mutation.addedNodes) {
-                if (node.nodeType === 1) { // 元素节点
-                    if (node.tagName === 'VIDEO') {
-                        attachVideoListener(node);
-                    } else if (node.querySelectorAll) {
-                        // 检查子元素里有没有 video
-                        node.querySelectorAll('video').forEach(attachVideoListener);
-                    }
-                }
-            }
+// 【新增】Shadow DOM 穿透查找
+function findVideosInShadow(root = document) {
+    let videos = Array.from(root.querySelectorAll('video'));
+    // 递归查找所有 shadowRoot
+    const allNodes = root.querySelectorAll('*');
+    for (const node of allNodes) {
+        if (node.shadowRoot) {
+            videos = videos.concat(findVideosInShadow(node.shadowRoot));
         }
+    }
+    return videos;
+}
+
+function getCachedVideoInfo() {
+    const currentUrl = window.location.href;
+    // 如果 URL 变了，或者缓存为空，则重新解析
+    if (currentUrl !== lastParseUrl || !cachedVideoInfo) {
+        cachedVideoInfo = parseVideoInfo();
+        lastParseUrl = currentUrl;
+    }
+    return cachedVideoInfo;
+}
+
+function startMonitoring() {
+    // 1. 首次运行：处理页面上已存在的 video (支持 Shadow DOM)
+    const scan = () => findVideosInShadow(document).forEach(attachVideoListener);
+    scan();
+
+    // 2. 优化后的观察者：防抖/节流处理，避免遍历 mutations
+    let timeout = null;
+    const observer = new MutationObserver((mutations) => {
+        if (timeout) return; // 如果已有计划任务，则忽略当前触发
+        
+        timeout = setTimeout(() => {
+            scan();
+            timeout = null;
+        }, 1000); // 1秒检查一次
     });
 
     observer.observe(document.body || document.documentElement, {
@@ -404,6 +427,11 @@ function attachVideoListener(video) {
             lastFavUpdateTime = 0; 
             cachedTopTitle = null;
             cachedTopUrl = null;
+
+            // 清除视频信息缓存，确保新视频加载时重新解析
+            cachedVideoInfo = null;
+            lastParseUrl = "";
+
             if (window.self !== window.top) isTopInfoReady = false; // Iframe 中重置就绪状态
             
             // 立即刷新一次顶层信息
@@ -457,7 +485,7 @@ function autoUpdateFavorites(video, overrideTime = null, overrideDuration = null
     const duration = overrideDuration !== null ? overrideDuration : (video ? video.duration : 0);
     
     // 主页面解析：这里的 parseVideoInfo 拥有最高权限，能看到 H1 和 URL
-    const info = parseVideoInfo();
+    const info = getCachedVideoInfo(); // 使用缓存
     const sName = info.seriesName;
     const latestFavs = config.favorites || {}; // 直接读内存
 
