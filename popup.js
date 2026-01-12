@@ -5,6 +5,8 @@ const defaultKeys = {
     rewind: { code: 'ArrowLeft', shift: true, ctrl: false, alt: false, keyName: 'Shift + ←' }
 };
 
+const defaultFolders = ["默认收藏", "国漫", "日漫", "周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+
 const defaultPresets = [
     { name: "B站标准 (自动)", intro: 90, outro: 0, restart: false, next: false, domain: "bilibili" },
     { name: "爱奇艺 (自动)", intro: 120, outro: 30, restart: true, next: true, domain: "iqiyi" },
@@ -15,6 +17,7 @@ let tempKeyForward = null;
 let tempKeyRewind = null;
 let currentPresets = [];
 let currentFavorites = {};
+let currentFolders = [];
 
 document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.local.get({
@@ -36,11 +39,13 @@ document.addEventListener('DOMContentLoaded', () => {
         keyForward: defaultKeys.forward,
         keyRewind: defaultKeys.rewind,
         savedPresets: defaultPresets,
-        favorites: {} 
+        favorites: {},
+        favFolders: defaultFolders
     }, (items) => {
         loadConfigToUI(items);
         currentPresets = items.savedPresets;
         currentFavorites = items.favorites;
+        currentFolders = items.favFolders;
         
         document.getElementById('autoUpdateFav').checked = items.autoUpdateFav;
         document.getElementById('autoApplyPreset').checked = items.autoApplyPreset;
@@ -53,6 +58,45 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             activeNameLabel.style.display = 'none';
         }
+
+        renderFolderSelect();
+        
+        document.getElementById('folderSelect').addEventListener('change', () => {
+            renderFavoritesList(); 
+        });
+
+        document.getElementById('newFolderBtn').addEventListener('click', () => {
+            const name = prompt("请输入新收藏夹名称 (例如: 补番中):");
+            if (name && !currentFolders.includes(name)) {
+                currentFolders.push(name);
+                saveFolders();
+                renderFolderSelect(name);
+            }
+        });
+        
+        document.getElementById('delFolderBtn').addEventListener('click', () => {
+             const select = document.getElementById('folderSelect');
+             const folder = select.value;
+             
+             if (folder === "__ALL__") {
+                 alert("无法删除“全部展示”视图。\n请切换到具体文件夹后再执行删除操作。");
+                 return;
+             }
+
+             if (folder === "默认收藏") {
+                 alert("无法删除默认收藏夹");
+                 return;
+             }
+             if (confirm(`删除文件夹 "${folder}"？\n其中的番剧将移动到 "默认收藏"。`)) {
+                 Object.values(currentFavorites).forEach(item => {
+                     if (item.folder === folder) item.folder = "默认收藏";
+                 });
+                 currentFolders = currentFolders.filter(f => f !== folder);
+                 saveDataAndRender();
+                 saveFolders();
+                 renderFolderSelect("默认收藏");
+             }
+        });
 
         renderPresetDropdown();
         renderFavoritesList();
@@ -84,10 +128,20 @@ document.getElementById('addFavBtn').addEventListener('click', () => {
                     }
                     if (titleResponse.url) finalData.url = titleResponse.url;
                 }
+                
+                const currentFolder = document.getElementById('folderSelect').value;
+                let targetFolder = currentFolder;
+                
+                if (targetFolder === "__ALL__") {
+                    targetFolder = "默认收藏";
+                }
+                
+                finalData.folder = targetFolder;
+                
                 currentFavorites[finalData.series] = finalData;
                 chrome.storage.local.set({ favorites: currentFavorites }, () => {
                     renderFavoritesList();
-                    showFloatingToast(`✅ 已收藏！\n${finalData.series}\n${finalData.episode}`);
+                    showFloatingToast(`✅ 已收藏到 [${targetFolder}]\n${finalData.series}`);
                 });
             });
         });
@@ -107,43 +161,136 @@ function showFloatingToast(msg) {
     setTimeout(() => { toast.classList.remove('show'); }, 2000);
 }
 
+function saveFolders() {
+    chrome.storage.local.set({ favFolders: currentFolders });
+}
+function saveDataAndRender() {
+    chrome.storage.local.set({ favorites: currentFavorites }, () => {
+        renderFavoritesList();
+    });
+}
+function renderFolderSelect(selectValue) {
+    const select = document.getElementById('folderSelect');
+    const oldVal = selectValue || select.value || "__ALL__";
+    select.innerHTML = '';
+    
+    const allOpt = document.createElement('option');
+    allOpt.value = "__ALL__";
+    allOpt.innerText = "≡ 全部展示";
+    select.appendChild(allOpt);
+
+    currentFolders.forEach(f => {
+        const opt = document.createElement('option');
+        opt.value = f;
+        opt.innerText = f;
+        select.appendChild(opt);
+    });
+    
+    select.value = oldVal;
+    if (select.value !== oldVal) {
+        select.value = "__ALL__";
+    }
+}
+
 function renderFavoritesList() {
     const listDiv = document.getElementById('favList');
+    const currentFolder = document.getElementById('folderSelect').value;
+
     if (!currentFavorites || Object.keys(currentFavorites).length === 0) {
         listDiv.innerHTML = '<div style="padding:15px; text-align:center; color:#999; font-size:12px;">暂无收藏</div>';
         return;
     }
+    
     listDiv.innerHTML = '';
-    const sortedItems = Object.values(currentFavorites).sort((a, b) => b.timestamp - a.timestamp);
+    
+    let sortedItems = Object.values(currentFavorites);
+
+    if (currentFolder !== "__ALL__") {
+        sortedItems = sortedItems.filter(item => {
+            const itemFolder = item.folder || "默认收藏";
+            return itemFolder === currentFolder;
+        });
+    }
+
+    sortedItems.sort((a, b) => b.timestamp - a.timestamp);
+
+    if (sortedItems.length === 0) {
+        const msg = currentFolder === "__ALL__" ? "暂无任何收藏" : `"${currentFolder}" 为空`;
+        listDiv.innerHTML = `<div style="padding:15px; text-align:center; color:#999; font-size:12px;">${msg}</div>`;
+        return;
+    }
+
     const formatTime = (seconds) => {
         const m = Math.floor(seconds / 60).toString().padStart(2, '0');
         const s = Math.floor(seconds % 60).toString().padStart(2, '0');
         return `${m}:${s}`;
     };
+
     sortedItems.forEach(item => {
         const div = document.createElement('div');
         div.className = 'fav-item';
-        div.title = "点击跳转续看";
+        
+        let folderBadge = '';
+        if (currentFolder === "__ALL__") {
+            folderBadge = `<span style="background:#f0f0f0; color:#888; padding:1px 4px; border-radius:3px; margin-right:4px; font-size:10px; border:1px solid #eee;">${item.folder || '默认'}</span>`;
+        }
+
         div.innerHTML = `
             <div class="fav-series">${item.series}</div>
             <div class="fav-episode">
-                <span><span class="fav-tag">${item.site}</span>${item.episode}</span>
+                <span style="display:flex; align-items:center;">
+                    ${folderBadge} <span class="fav-tag">${item.site}</span>
+                    <span style="max-width: 80px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.episode}</span>
+                </span>
                 <span class="fav-time">${formatTime(item.time)} / ${formatTime(item.duration)}</span>
             </div>
-            <div class="fav-del" title="删除">×</div>
+            <div class="fav-actions" style="position: absolute; right: 5px; top: 5px; display: none;">
+                <button class="btn-move" title="移动文件夹" style="border:1px solid #ddd; background:#fff; cursor:pointer; font-size:10px; margin-right:2px;">📂</button>
+                <button class="btn-del" title="删除" style="border:1px solid #ffcccc; background:#fff; color:red; cursor:pointer; font-size:10px;">×</button>
+            </div>
         `;
+        
+        div.onmouseenter = () => { 
+            const actions = div.querySelector('.fav-actions');
+            if(actions) actions.style.display = 'block'; 
+        };
+        div.onmouseleave = () => { 
+            const actions = div.querySelector('.fav-actions');
+            if(actions) actions.style.display = 'none'; 
+        };
+
         div.addEventListener('click', (e) => {
-            if (e.target.classList.contains('fav-del')) return;
+            if (e.target.closest('.fav-actions')) return;
             chrome.tabs.create({ url: item.url });
         });
-        div.querySelector('.fav-del').addEventListener('click', (e) => {
+
+        div.querySelector('.btn-del').addEventListener('click', (e) => {
             e.stopPropagation();
             if (confirm(`删除 "${item.series}"?`)) {
                 delete currentFavorites[item.series];
-                chrome.storage.local.set({ favorites: currentFavorites });
-                renderFavoritesList();
+                saveDataAndRender();
             }
         });
+
+        div.querySelector('.btn-move').addEventListener('click', (e) => {
+            e.stopPropagation();
+            const targetFolder = prompt("移动到哪个文件夹?\n(输入文件夹名称)", currentFolders.join(", "));
+            if (targetFolder) {
+                if (!currentFolders.includes(targetFolder)) {
+                    if(confirm(`文件夹 "${targetFolder}" 不存在，是否创建？`)){
+                        currentFolders.push(targetFolder);
+                        saveFolders();
+                        renderFolderSelect();
+                    } else {
+                        return;
+                    }
+                }
+                currentFavorites[item.series].folder = targetFolder;
+                saveDataAndRender();
+                showFloatingToast(`已移动到 ${targetFolder}`);
+            }
+        });
+
         listDiv.appendChild(div);
     });
 }
@@ -269,7 +416,8 @@ document.getElementById('saveBtn').addEventListener('click', () => {
         autoApplyPreset: document.getElementById('autoApplyPreset').checked, // 保存开关
 
         savedPresets: currentPresets,
-        favorites: currentFavorites
+        favorites: currentFavorites,
+        favFolders: currentFolders
     };
     chrome.storage.local.set(config, () => { showTempMessage('✅ 配置已保存'); });
 });

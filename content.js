@@ -28,6 +28,7 @@ let config = {
 };
 
 let isSwitchingEpisode = false;
+let lastCheckTime = 0;
 
 // --- 消息监听 ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -326,16 +327,24 @@ function autoUpdateFavorites(video) {
     try {
         const info = parseVideoInfo();
         const sName = info.seriesName;
+        
+        let existingItem = {};
         if (config.favorites && config.favorites[sName]) {
-            const newData = {
-                series: sName,
-                episode: info.episodeName,
-                site: info.siteName,
-                url: getResumeUrl(video),
-                time: Math.floor(video.currentTime),
-                duration: Math.floor(video.duration || 0),
-                timestamp: now
-            };
+            existingItem = config.favorites[sName];
+        }
+
+        const newData = {
+            series: sName,
+            episode: info.episodeName,
+            site: info.siteName,
+            url: getResumeUrl(video),
+            time: Math.floor(video.currentTime),
+            duration: Math.floor(video.duration || 0),
+            timestamp: now,
+            folder: existingItem.folder || "默认收藏"
+        };
+
+        if (config.favorites) {
             config.favorites[sName] = newData;
             chrome.storage.local.set({ favorites: config.favorites });
             lastFavUpdateTime = now;
@@ -344,6 +353,12 @@ function autoUpdateFavorites(video) {
 }
 
 function handleTimeUpdate(e) {
+    const now = Date.now();
+    if (now - lastCheckTime < 500) {
+        return;
+    }
+    lastCheckTime = now;
+
     const video = e.target;
     autoUpdateFavorites(video);
 
