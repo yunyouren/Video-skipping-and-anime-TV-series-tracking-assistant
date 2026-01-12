@@ -19,6 +19,8 @@ let currentPresets = [];
 let currentFavorites = {};
 let currentFolders = [];
 let targetMoveSeries = null;
+let visibleCount = 20; // 当前显示数量
+const PAGE_SIZE = 20;  // 每次加载数量
 
 document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.local.get({
@@ -67,6 +69,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderFolderSelect();
         
         document.getElementById('folderSelect').addEventListener('change', () => {
+            visibleCount = PAGE_SIZE; // 切换文件夹时重置
             renderFavoritesList(); 
         });
 
@@ -393,13 +396,17 @@ function renderFavoritesList() {
         return;
     }
 
+    // 分页切片
+    const totalItems = sortedItems.length;
+    const itemsToShow = sortedItems.slice(0, visibleCount);
+
     const formatTime = (seconds) => {
         const m = Math.floor(seconds / 60).toString().padStart(2, '0');
         const s = Math.floor(seconds % 60).toString().padStart(2, '0');
         return `${m}:${s}`;
     };
 
-    sortedItems.forEach(item => {
+    itemsToShow.forEach(item => {
         const div = document.createElement('div');
         div.className = 'fav-item';
         
@@ -496,6 +503,23 @@ function renderFavoritesList() {
 
         fragment.appendChild(div);
     });
+
+    // 加载更多按钮
+    if (visibleCount < totalItems) {
+        const loadMoreDiv = document.createElement('div');
+        loadMoreDiv.style.textAlign = 'center';
+        loadMoreDiv.style.padding = '10px';
+        loadMoreDiv.innerHTML = `<button id="btnLoadMore" style="padding:5px 15px; cursor:pointer; background:#f0f0f0; border:1px solid #ddd; border-radius:4px;">加载更多 (${totalItems - visibleCount})</button>`;
+        fragment.appendChild(loadMoreDiv);
+        
+        // 使用 setTimeout 确保插入 DOM 后绑定事件
+        setTimeout(() => {
+            document.getElementById('btnLoadMore')?.addEventListener('click', () => {
+                visibleCount += PAGE_SIZE;
+                renderFavoritesList();
+            });
+        }, 0);
+    }
     
     listDiv.innerHTML = '';
     listDiv.appendChild(fragment);

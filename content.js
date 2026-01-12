@@ -363,6 +363,7 @@ let isTopInfoReady = false; // 标记顶层信息是否已就绪
 // 【新增】视频信息缓存
 let cachedVideoInfo = null;
 let lastParseUrl = "";
+let lastUrl = window.location.href; // 用于检测 SPA URL 变化
 
 const processedVideos = new WeakSet();
 
@@ -523,6 +524,26 @@ function autoUpdateFavorites(video, overrideTime = null, overrideDuration = null
 }
 
 function handleTimeUpdate(e) {
+    // 【新增】检测 SPA URL 变化
+    // 很多网站（如 B站）切换集数时页面不刷新，但 URL 变了
+    if (window.location.href !== lastUrl) {
+        lastUrl = window.location.href;
+        console.log("Skipper: 检测到 URL 变化，强制重置状态");
+        
+        // 强制重置状态，重新匹配规则
+        cachedVideoInfo = null; // 清除缓存
+        lastParseUrl = "";
+        
+        // 重新运行匹配逻辑
+        checkAndApplyAutoMatch();
+        
+        // 可能需要重置其他状态，例如
+        hasSkippedIntro = false;
+        hasTriggeredRestart = false;
+        isSwitchingEpisode = false;
+        videoLoadStartTime = Date.now();
+    }
+
     const now = Date.now();
     if (now - lastCheckTime < 500) {
         return;
