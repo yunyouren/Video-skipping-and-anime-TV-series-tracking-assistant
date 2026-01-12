@@ -373,7 +373,8 @@ function renderFavoritesList() {
         return;
     }
     
-    listDiv.innerHTML = '';
+    // 使用 DocumentFragment 优化渲染
+    const fragment = document.createDocumentFragment();
     
     let sortedItems = Object.values(currentFavorites);
 
@@ -493,8 +494,11 @@ function renderFavoritesList() {
             moveModal.style.display = 'flex';
         });
 
-        listDiv.appendChild(div);
+        fragment.appendChild(div);
     });
+    
+    listDiv.innerHTML = '';
+    listDiv.appendChild(fragment);
 }
 
 function renderPresetDropdown() {

@@ -9,6 +9,13 @@ if (window.hasBiliSkipperLoaded) {
 }
 window.hasBiliSkipperLoaded = true;
 
+// 【新增】快速退出机制
+// 如果当前 iframe 尺寸太小（可能是广告或统计代码），直接不运行脚本
+if (window.self !== window.top) {
+    // 如果宽或高小于 100px，通常不是视频播放器
+    if (window.innerWidth < 100 || window.innerHeight < 100) return;
+}
+
 // --- 全局配置 ---
 let config = {
     autoSkipEnable: false,
@@ -353,58 +360,75 @@ let cachedTopTitle = null; // 缓存顶层标题 (解决 Iframe 无法获取标�
 let cachedTopUrl = null;
 let isTopInfoReady = false; // 标记顶层信息是否已就绪
 
+const processedVideos = new WeakSet();
+
 function startMonitoring() {
-    window.biliMonitorInterval = setInterval(() => {
-        const video = findMainVideo();
-        if (!video) return;
+    // 1. 首次运行：处理页面上已存在的 video
+    document.querySelectorAll('video').forEach(attachVideoListener);
 
-        // 如果在 Iframe 中且没有缓存过标题，尝试向 Background 获取顶层标题
-        if (window.self !== window.top && (!cachedTopTitle || !cachedTopUrl)) {
-             chrome.runtime.sendMessage({ action: "getTabTitle" }, (response) => {
-                 if (response) {
-                     if (response.title) cachedTopTitle = response.title;
-                     if (response.url) cachedTopUrl = response.url;
-                     isTopInfoReady = true;
-                     console.log("Skipper: 已获取顶层信息 ->", cachedTopTitle, cachedTopUrl);
-                 }
-             });
-        } else if (window.self === window.top) {
-            isTopInfoReady = true; // 顶层页面无需等待
-        }
-
-        if (!video.dataset.hasSkipperListener) {
-            video.addEventListener('timeupdate', handleTimeUpdate);
-            const resetState = () => { 
-                hasSkippedIntro = false; 
-                isSwitchingEpisode = false; 
-                hasTriggeredRestart = false; 
-                videoLoadStartTime = Date.now(); 
-                restartCooldownTime = 0; 
-                lastFavUpdateTime = 0; 
-                cachedTopTitle = null;
-                cachedTopUrl = null;
-                if (window.self !== window.top) isTopInfoReady = false; // Iframe 中重置就绪状态
-                
-                // 立即刷新一次顶层信息
-                chrome.runtime.sendMessage({ action: "getTabTitle" }, (response) => {
-                    if (response) {
-                        if (response.title) cachedTopTitle = response.title;
-                        if (response.url) cachedTopUrl = response.url;
-                        isTopInfoReady = true;
+    // 2. 建立观察者：监听后续动态添加的 video
+    const observer = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+            for (const node of mutation.addedNodes) {
+                if (node.nodeType === 1) { // 元素节点
+                    if (node.tagName === 'VIDEO') {
+                        attachVideoListener(node);
+                    } else if (node.querySelectorAll) {
+                        // 检查子元素里有没有 video
+                        node.querySelectorAll('video').forEach(attachVideoListener);
                     }
-                });
-                setTimeout(checkAndApplyAutoMatch, 1000);
-            };
-            video.addEventListener('loadedmetadata', resetState);
-            video.addEventListener('durationchange', resetState); 
-            video.addEventListener('emptied', resetState);
-            video.addEventListener('seeking', () => { 
-                if(video.currentTime < 1) hasSkippedIntro = false; 
-            });
-            videoLoadStartTime = Date.now();
-            video.dataset.hasSkipperListener = 'true';
+                }
+            }
         }
-    }, 1000);
+    });
+
+    observer.observe(document.body || document.documentElement, {
+        childList: true,
+        subtree: true
+    });
+}
+
+function attachVideoListener(video) {
+    if (processedVideos.has(video)) return; // 避免重复绑定
+    processedVideos.add(video);
+
+    if (!video.dataset.hasSkipperListener) {
+        video.addEventListener('timeupdate', handleTimeUpdate);
+        
+        const resetState = () => { 
+            hasSkippedIntro = false; 
+            isSwitchingEpisode = false; 
+            hasTriggeredRestart = false; 
+            videoLoadStartTime = Date.now(); 
+            restartCooldownTime = 0; 
+            lastFavUpdateTime = 0; 
+            cachedTopTitle = null;
+            cachedTopUrl = null;
+            if (window.self !== window.top) isTopInfoReady = false; // Iframe 中重置就绪状态
+            
+            // 立即刷新一次顶层信息
+            if (window.self !== window.top) {
+                 chrome.runtime.sendMessage({ action: "getTabTitle" }, (response) => {
+                     if (response) {
+                         if (response.title) cachedTopTitle = response.title;
+                         if (response.url) cachedTopUrl = response.url;
+                         isTopInfoReady = true;
+                     }
+                 });
+            }
+            setTimeout(checkAndApplyAutoMatch, 1000);
+        };
+
+        video.addEventListener('loadedmetadata', resetState);
+        video.addEventListener('durationchange', resetState); 
+        video.addEventListener('emptied', resetState);
+        video.addEventListener('seeking', () => { 
+            if(video.currentTime < 1) hasSkippedIntro = false; 
+        });
+        
+        videoLoadStartTime = Date.now();
+        video.dataset.hasSkipperListener = 'true';
+    }
 }
 
 function autoUpdateFavorites(video, overrideTime = null, overrideDuration = null) {
@@ -435,37 +459,39 @@ function autoUpdateFavorites(video, overrideTime = null, overrideDuration = null
     // 主页面解析：这里的 parseVideoInfo 拥有最高权限，能看到 H1 和 URL
     const info = parseVideoInfo();
     const sName = info.seriesName;
+    const latestFavs = config.favorites || {}; // 直接读内存
 
-    chrome.storage.local.get({ favorites: {} }, (items) => {
-        const latestFavs = items.favorites || {};
-        
-        // 只有已收藏的才更新
-        if (!latestFavs[sName]) return;
-        
-        const existingItem = latestFavs[sName];
+    // 只有已收藏的才更新
+    if (!latestFavs[sName]) return;
+    
+    // 【优化】: 增加写入节流
+    // 如果进度变化很小(比如暂停时)，不要重复写入 storage
+    const existingItem = latestFavs[sName];
+    if (Math.abs(existingItem.time - currentTime) < 2 && existingItem.url === window.location.href) {
+        return; // 变化太小，跳过写入
+    }
 
-        // 构造新数据
-        const newData = {
-            ...existingItem,
-            series: sName,
-            episode: info.episodeName,
-            site: info.siteName, // 这里用的就是主页面的解析结果，和手动收藏绝对一致！
-            // URL 始终使用主页面的 URL，彻底解决了 Iframe 乱码链接的问题
-            url: window.location.href,
-            time: Math.floor(currentTime),
-            duration: Math.floor(duration),
-            timestamp: Date.now()
-        };
+    // 构造新数据
+    const newData = {
+        ...existingItem,
+        series: sName,
+        episode: info.episodeName,
+        site: info.siteName, // 这里用的就是主页面的解析结果，和手动收藏绝对一致！
+        // URL 始终使用主页面的 URL，彻底解决了 Iframe 乱码链接的问题
+        url: window.location.href,
+        time: Math.floor(currentTime),
+        duration: Math.floor(duration),
+        timestamp: Date.now()
+    };
 
-        // 如果是 Iframe 同步过来的，我们只更新时间，不轻易改 URL (防止单页应用 URL 没变的情况)
-        // 但通常保持 window.location.href 是最安全的，因为它就是用户看到的链接
-        
-        latestFavs[sName] = newData;
-        chrome.storage.local.set({ favorites: latestFavs });
-        
-        // 更新内存缓存
-        config.favorites = latestFavs;
-    });
+    // 如果是 Iframe 同步过来的，我们只更新时间，不轻易改 URL (防止单页应用 URL 没变的情况)
+    // 但通常保持 window.location.href 是最安全的，因为它就是用户看到的链接
+    
+    latestFavs[sName] = newData;
+    chrome.storage.local.set({ favorites: latestFavs });
+    
+    // 更新内存缓存
+    config.favorites = latestFavs;
 }
 
 function handleTimeUpdate(e) {
