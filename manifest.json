@@ -10,9 +10,7 @@
   },
   "permissions": [
     "storage",
-    "tabs",
-    "scripting",
-    "activeTab"
+    "tabs"
   ],
   "host_permissions": [
     "<all_urls>"

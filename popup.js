@@ -205,7 +205,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const dateStr = date.getFullYear() +
                         (date.getMonth()+1).toString().padStart(2, '0') +
                         date.getDate().toString().padStart(2, '0');
-        const nameSuffix = selectedFolders.length === 1 ? `-${selectedFolders[0]}` : '';
+        
+        // 修复：文件名安全处理，防止非法字符导致下载失败
+        const safeFolderName = selectedFolders.length === 1 ? selectedFolders[0].replace(/[\\/:*?"<>|]/g, "_") : '';
+        const nameSuffix = selectedFolders.length === 1 ? `-${safeFolderName}` : '';
         const filename = `skipper-backup${nameSuffix}-${dateStr}.json`;
 
         const blob = new Blob([JSON.stringify(exportData, null, 2)], {type: "application/json"});

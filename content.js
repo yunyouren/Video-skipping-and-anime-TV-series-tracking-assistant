@@ -257,47 +257,40 @@ function parseVideoInfo(overrideTitle = null, overrideUrl = null) {
     let episodeName = "";
     
     // ============ 【修改开始】 ============
-    let siteName = null; // 先不设默认值
+    let siteName = null; 
 
     // 1. 优先遍历用户自定义规则
-    // config.customTagRules 是从 storage 自动同步过来的
     if (config.customTagRules && Array.isArray(config.customTagRules)) {
         for (const rule of config.customTagRules) {
-            // 确保规则有效
             if (rule.match && rule.name) {
-                // 检查 URL 或 标题 是否包含关键词
                 if (url.includes(rule.match) || rawTitle.includes(rule.match)) {
                     siteName = rule.name;
-                    break; // 找到匹配项后立即停止，不再继续
+                    break; 
                 }
             }
         }
     }
 
-    // 2. 如果自定义规则没匹配到，再跑默认逻辑
+    // 2. 策略模式匹配站点
+    const strategy = getSiteStrategy(url);
     if (!siteName) {
-        if (url.includes("bilibili.com")) siteName = "B站";
-        else if (url.includes("iqiyi")) siteName = "爱奇艺";
-        // 移除 rawTitle.includes("樱花") 模糊匹配，只保留域名匹配，确保来源识别精准且一致
-        else if (url.includes("yinghuacd") || url.includes("yhdmp")) siteName = "樱花";
-        else if (url.includes("v.qq.com")) siteName = "腾讯";
-        else if (url.includes("youku")) siteName = "优酷";
-        else if (url.includes("mgtv")) siteName = "芒果";
-        else siteName = "Web"; // 最后的保底
+        siteName = strategy.name;
     }
     // ============ 【修改结束】 ============
 
-    let cleanTitle = rawTitle
-        .replace(/_bilibili.*/i, "")
-        .replace(/-bilibili.*/i, "")
-        .replace(/-国创.*/i, "")
-        .replace(/-番剧.*/i, "")
+    let cleanTitle = rawTitle;
+    
+    // 应用站点特定的清理逻辑
+    if (strategy.clean) {
+        cleanTitle = strategy.clean(cleanTitle);
+    }
+
+    // 应用通用清理逻辑
+    cleanTitle = cleanTitle
         .replace(/-全集.*/i, "")
         .replace(/在线观看.*/i, "")
         .replace(/_在线观看.*/i, "")
         .replace(/_高清.*/i, "")
-        .replace(/_NT动漫.*/i, "")
-        .replace(/樱花动漫.*/i, "") 
         .replace(/播放器.*/i, "")   
         .trim();
 
@@ -366,6 +359,47 @@ let lastParseUrl = "";
 let lastUrl = window.location.href; // 用于检测 SPA URL 变化
 
 const processedVideos = new WeakSet();
+
+// --- 站点策略 ---
+const SITE_STRATEGIES = [
+    {
+        domain: 'bilibili.com',
+        name: 'B站',
+        clean: (title) => title.replace(/[_| -]bilibili.*/i, "").replace(/-国创.*/i, "").replace(/-番剧.*/i, "")
+    },
+    {
+        domain: ['yinghuacd.com', 'yhdmp.com'],
+        name: '樱花',
+        clean: (title) => title.replace(/樱花动漫.*/i, "").replace(/_NT动漫.*/i, "")
+    },
+    {
+        domain: 'iqiyi.com',
+        name: '爱奇艺'
+    },
+    {
+        domain: 'v.qq.com',
+        name: '腾讯'
+    },
+    {
+        domain: 'youku.com',
+        name: '优酷'
+    },
+    {
+        domain: 'mgtv.com',
+        name: '芒果'
+    }
+];
+
+function getSiteStrategy(url) {
+    for (const strategy of SITE_STRATEGIES) {
+        if (Array.isArray(strategy.domain)) {
+            if (strategy.domain.some(d => url.includes(d))) return strategy;
+        } else {
+            if (url.includes(strategy.domain)) return strategy;
+        }
+    }
+    return { name: 'Web', clean: (t) => t };
+}
 
 // 【新增】Shadow DOM 穿透查找
 function findVideosInShadow(root = document) {
@@ -623,8 +657,17 @@ function showToast(text) {
             border-radius: 20px; font-size: 14px; z-index: 2147483647; pointer-events: none;
             transition: opacity 0.3s; font-family: sans-serif; box-shadow: 0 2px 10px rgba(0,0,0,0.2);
         `;
-        document.body.appendChild(toast);
     }
+    
+    // 【优化】防止全屏模式下 Toast 被遮挡
+    // 优先插入到当前全屏元素内部，否则插入到 body
+    const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement;
+    const targetContainer = fullscreenElement || document.body;
+    
+    if (toast.parentNode !== targetContainer) {
+        targetContainer.appendChild(toast);
+    }
+
     toast.innerText = text;
     toast.style.opacity = '1';
     clearTimeout(toastTimeout);
