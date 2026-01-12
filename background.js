@@ -36,6 +36,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ title: title, url: url });
         return true; // 保持消息通道开启
     }
+
+    // 【新增】同步进度消息转发：从 Iframe -> Background -> Top Frame
+    if (request.action === "syncVideoProgress") {
+        if (sender.tab && sender.tab.id) {
+            // 定向发送给该标签页的 Frame 0 (即主页面)
+            chrome.tabs.sendMessage(sender.tab.id, {
+                action: "triggerAutoUpdate",
+                time: request.time,
+                duration: request.duration
+            }, { frameId: 0 }); // 关键：只发给主框架
+        }
+    }
 });
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     // 只有当页面加载完成 (complete) 且有 URL 时才尝试注入

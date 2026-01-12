@@ -29,7 +29,8 @@ let config = {
     favorites: {},
     
     // 【新增】
-    customTagRules: []
+    customTagRules: [],
+    customSeriesRules: []
 };
 
 let isSwitchingEpisode = false;
@@ -62,6 +63,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             console.error("Skipper: 解析出错", e);
         }
     }
+
+    // 【新增】主页面接收来自 Background (其实是 Iframe) 的进度同步
+    if (request.action === "triggerAutoUpdate") {
+        // 调用保存函数，传入 Iframe 里的时间和时长
+        // 第一个参数传 null，因为主页面可能没有 video 标签，不需要它
+        autoUpdateFavorites(null, request.time, request.duration);
+    }
+
     return true; 
 });
 
@@ -228,7 +237,8 @@ function onKeyHandler(event) {
 }
 
 function parseVideoInfo(overrideTitle = null, overrideUrl = null) {
-    let rawTitle = (overrideTitle || document.title).trim();
+    // 优先使用传入的 overrideTitle，其次尝试使用缓存的顶层标题（如果存在），最后使用当前文档标题
+    let rawTitle = (overrideTitle || cachedTopTitle || document.title).trim();
     // 优先使用传入的 overrideUrl，其次尝试使用缓存的顶层 URL（如果存在），最后使用当前窗口 URL
     const url = overrideUrl || cachedTopUrl || window.location.href;
     const h1 = document.querySelector('h1');
@@ -261,7 +271,8 @@ function parseVideoInfo(overrideTitle = null, overrideUrl = null) {
     if (!siteName) {
         if (url.includes("bilibili.com")) siteName = "B站";
         else if (url.includes("iqiyi")) siteName = "爱奇艺";
-        else if (url.includes("yinghuacd") || url.includes("yhdmp") || rawTitle.includes("樱花")) siteName = "樱花";
+        // 移除 rawTitle.includes("樱花") 模糊匹配，只保留域名匹配，确保来源识别精准且一致
+        else if (url.includes("yinghuacd") || url.includes("yhdmp")) siteName = "樱花";
         else if (url.includes("v.qq.com")) siteName = "腾讯";
         else if (url.includes("youku")) siteName = "优酷";
         else if (url.includes("mgtv")) siteName = "芒果";
@@ -314,6 +325,20 @@ function parseVideoInfo(overrideTitle = null, overrideUrl = null) {
     
     seriesName = seriesName.replace(/(第\s*\d+\s*[集话]).*/, "").trim();
     if (seriesName.length === 0) seriesName = "未知番剧";
+
+    // --- 【新增】自定义番剧名覆盖 ---
+    // 允许用户通过关键词强制修正番剧名称 (例如: "进击的巨人 Final" -> "进击的巨人")
+    if (config.customSeriesRules && Array.isArray(config.customSeriesRules)) {
+        for (const rule of config.customSeriesRules) {
+             if (rule.match && rule.name) {
+                 // 匹配 URL 或 原始标题
+                 if (url.includes(rule.match) || rawTitle.includes(rule.match)) {
+                     seriesName = rule.name;
+                     break; 
+                 }
+             }
+        }
+    }
 
     return { seriesName, episodeName, siteName };
 }
@@ -382,92 +407,65 @@ function startMonitoring() {
     }, 1000);
 }
 
-function autoUpdateFavorites(video) {
+function autoUpdateFavorites(video, overrideTime = null, overrideDuration = null) {
     if (!config.autoUpdateFav) return;
 
-    // 降级策略：如果拿不到顶层信息，但我们确实在一个视频播放器里，且收藏夹里有该番剧名，则允许更新
-    if (window.self !== window.top && !isTopInfoReady) {
-         // 不直接 return，而是让后续逻辑去尝试匹配。
-         // 后续的 chrome.storage.local.get 会检查 items.favorites[sName]，如果匹配不上自然会退出。
-         console.warn("Skipper: 暂未获取顶层信息，尝试使用内部标题进行匹配更新...");
+    // 1. 如果是在 Iframe 里，我们不再自己保存，而是发送消息给主页面让它保存
+    // 这样能确保解析的标题来源和手动收藏时完全一致
+    if (window.self !== window.top) {
+        const now = Date.now();
+        // 限制发送频率，避免消息轰炸 (每 5 秒同步一次)
+        if (now - lastFavUpdateTime < 5000) return;
+        
+        chrome.runtime.sendMessage({
+            action: "syncVideoProgress",
+            time: video.currentTime,
+            duration: video.duration
+        });
+        lastFavUpdateTime = now;
+        return; // Iframe 的任务结束，直接退出
     }
 
-    // 如果在 Iframe 中且尚未获取到顶层 URL，我们尝试使用 existingItem.url 进行回退，而不是直接 return
-    // if (window.self !== window.top && !cachedTopUrl) return; // 移除之前的强硬拦截
+    // 2. 以下逻辑只在主页面 (Top Frame) 执行 ===========================
+    
+    // 确定时间：如果有外部传入的时间(来自Iframe)，就用外部的；否则用自己的(针对非Iframe视频)
+    const currentTime = overrideTime !== null ? overrideTime : (video ? video.currentTime : 0);
+    const duration = overrideDuration !== null ? overrideDuration : (video ? video.duration : 0);
+    
+    // 主页面解析：这里的 parseVideoInfo 拥有最高权限，能看到 H1 和 URL
+    const info = parseVideoInfo();
+    const sName = info.seriesName;
 
-    const now = Date.now();
-    if (now - lastFavUpdateTime < 10000) return;
-    if (video.currentTime < 10) return;
-
-    try {
-        // 如果有缓存的顶层标题 (Iframe 情况)，优先使用它进行解析
-        const info = parseVideoInfo(cachedTopTitle, cachedTopUrl);
-        const sName = info.seriesName;
+    chrome.storage.local.get({ favorites: {} }, (items) => {
+        const latestFavs = items.favorites || {};
         
-        // --- 修复：使用异步获取最新数据，防止覆盖 Popup 的修改 ---
-        chrome.storage.local.get({ favorites: {} }, (items) => {
-            const latestFavs = items.favorites || {};
-            
-            // 只有当番剧已经在收藏夹中时，才自动更新进度
-            if (!latestFavs[sName]) {
-                return;
-            }
-            
-            const existingItem = latestFavs[sName];
+        // 只有已收藏的才更新
+        if (!latestFavs[sName]) return;
+        
+        const existingItem = latestFavs[sName];
 
-            // --- URL 保护逻辑 ---
-            // 默认尝试获取当前 URL (可能会优先用 cachedTopUrl)
-            let finalUrl = getResumeUrl(video);
-            
-            // 如果我们在 Iframe 中，且没有获取到有效的 cachedTopUrl (或者 getResumeUrl 返回了 iframe 地址)
-            // 并且我们有已存在的有效 URL，则优先复用已存在的 URL，防止被 iframe 地址覆盖
-            if (window.self !== window.top) {
-                const isCachedUrlAvailable = !!cachedTopUrl;
-                
-                // 如果没有 cachedTopUrl，或者 finalUrl 看起来和 existingItem.url 域名差异巨大(简单判定)，则回退
-                if (!isCachedUrlAvailable && existingItem.url) {
-                    // 复用旧 URL，但需要更新时间参数
-                    let baseOldUrl = existingItem.url;
-                    
-                    // 清理旧的时间参数
-                    baseOldUrl = baseOldUrl.replace(/[\?&]t=\d+s?/, "").replace(/[\?&]t=\d+/, "");
-                    if (baseOldUrl.endsWith('?') || baseOldUrl.endsWith('&')) baseOldUrl = baseOldUrl.slice(0, -1);
+        // 构造新数据
+        const newData = {
+            ...existingItem,
+            series: sName,
+            episode: info.episodeName,
+            site: info.siteName, // 这里用的就是主页面的解析结果，和手动收藏绝对一致！
+            // URL 始终使用主页面的 URL，彻底解决了 Iframe 乱码链接的问题
+            url: window.location.href,
+            time: Math.floor(currentTime),
+            duration: Math.floor(duration),
+            timestamp: Date.now()
+        };
 
-                    // 重新附加时间 (仅针对 B站/Youtube 等需要参数的站点，普通站点直接用 baseOldUrl)
-                    if (baseOldUrl.includes("bilibili.com") || baseOldUrl.includes("youtube.com") || baseOldUrl.includes("youtu.be")) {
-                         const separator = baseOldUrl.includes("?") ? "&" : "?";
-                         finalUrl = `${baseOldUrl}${separator}t=${Math.floor(video.currentTime)}`;
-                    } else {
-                         // 对于通用站点，通常不需要 t= 参数，直接使用原 URL
-                         finalUrl = baseOldUrl;
-                    }
-                    console.log("Skipper: Iframe 环境未获取到顶层URL，复用旧URL ->", finalUrl);
-                }
-            }
-
-            // --- 优化：使用解构保留所有原有字段 (如 folder, notes 等) ---
-            const newData = {
-                ...existingItem, // 保留原有的 folder 等属性
-                series: sName,
-                episode: info.episodeName,
-                // 优先使用已存在的 site 标签，防止自动更新时因环境问题导致标签变动 (如 樱花 -> Web)
-                site: existingItem.site || info.siteName,
-                url: finalUrl,
-                time: Math.floor(video.currentTime),
-                duration: Math.floor(video.duration || 0),
-                timestamp: now
-            };
-
-            latestFavs[sName] = newData;
-            
-            chrome.storage.local.set({ favorites: latestFavs });
-            
-            // 更新本地缓存，保持一致性
-            config.favorites = latestFavs;
-            lastFavUpdateTime = now;
-        });
-
-    } catch (e) { }
+        // 如果是 Iframe 同步过来的，我们只更新时间，不轻易改 URL (防止单页应用 URL 没变的情况)
+        // 但通常保持 window.location.href 是最安全的，因为它就是用户看到的链接
+        
+        latestFavs[sName] = newData;
+        chrome.storage.local.set({ favorites: latestFavs });
+        
+        // 更新内存缓存
+        config.favorites = latestFavs;
+    });
 }
 
 function handleTimeUpdate(e) {

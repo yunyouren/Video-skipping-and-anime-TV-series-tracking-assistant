@@ -5,9 +5,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 加载数据
     loadRules();
+    loadSeriesRules();
 
     // 绑定事件
     document.getElementById('btnAddRule').addEventListener('click', addRule);
+    document.getElementById('btnAddSeriesRule').addEventListener('click', addSeriesRule);
 });
 
 // --- 路由逻辑 ---
@@ -15,7 +17,7 @@ function handleHashChange() {
     let hash = window.location.hash.substring(1) || 'rules'; // 默认路由
     
     // 简单的路由映射
-    const pages = ['rules', 'about'];
+    const pages = ['rules', 'series', 'about'];
     if (!pages.includes(hash)) hash = 'rules';
 
     // 更新侧边栏状态
@@ -108,6 +110,89 @@ function deleteRule(index) {
             rules.splice(index, 1);
             chrome.storage.local.set({ customTagRules: rules }, () => {
                 renderList(rules);
+                showToast('规则已删除');
+            });
+        }
+    });
+}
+
+// --- 番剧名称规则逻辑 ---
+function loadSeriesRules() {
+    chrome.storage.local.get({ customSeriesRules: [] }, (items) => {
+        renderSeriesList(items.customSeriesRules);
+    });
+}
+
+function renderSeriesList(rules) {
+    const container = document.getElementById('seriesListContainer');
+    container.innerHTML = '';
+
+    if (!rules || rules.length === 0) {
+        container.innerHTML = '<div class="empty-tip">暂无番剧规则，请在上方添加。</div>';
+        return;
+    }
+
+    rules.forEach((rule, index) => {
+        const div = document.createElement('div');
+        div.className = 'rule-item';
+        div.innerHTML = `
+            <div style="display:flex; align-items:center;">
+                <span class="tag-match">${escapeHtml(rule.match)}</span>
+                <span class="tag-arrow">➔</span>
+                <span class="tag-name">${escapeHtml(rule.name)}</span>
+            </div>
+            <button class="btn-danger btn-del-series" data-index="${index}">删除</button>
+        `;
+        container.appendChild(div);
+    });
+
+    // 绑定删除事件
+    document.querySelectorAll('.btn-del-series').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const index = parseInt(e.target.dataset.index);
+            deleteSeriesRule(index);
+        });
+    });
+}
+
+function addSeriesRule() {
+    const matchInput = document.getElementById('seriesMatchInput');
+    const nameInput = document.getElementById('seriesNameInput');
+    
+    const match = matchInput.value.trim();
+    const name = nameInput.value.trim();
+
+    if (!match || !name) {
+        showToast('请填写完整的关键词和番剧名', true);
+        return;
+    }
+
+    chrome.storage.local.get({ customSeriesRules: [] }, (items) => {
+        const rules = items.customSeriesRules;
+        if (rules.some(r => r.match === match)) {
+            if (!confirm(`关键词 "${match}" 已存在，是否覆盖？`)) return;
+            const idx = rules.findIndex(r => r.match === match);
+            rules[idx] = { match, name };
+        } else {
+            rules.push({ match, name });
+        }
+
+        chrome.storage.local.set({ customSeriesRules: rules }, () => {
+            matchInput.value = '';
+            nameInput.value = '';
+            renderSeriesList(rules);
+            showToast('番剧规则已保存');
+        });
+    });
+}
+
+function deleteSeriesRule(index) {
+    chrome.storage.local.get({ customSeriesRules: [] }, (items) => {
+        const rules = items.customSeriesRules;
+        if (index >= 0 && index < rules.length) {
+            rules.splice(index, 1);
+            chrome.storage.local.set({ customSeriesRules: rules }, () => {
+                renderSeriesList(rules);
                 showToast('规则已删除');
             });
         }

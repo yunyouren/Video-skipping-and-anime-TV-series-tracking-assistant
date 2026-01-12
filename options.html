@@ -112,6 +112,9 @@
     <a href="#rules" class="nav-item active" data-target="rules">
       <span class="nav-icon">🏷️</span> 站点标签规则
     </a>
+    <a href="#series" class="nav-item" data-target="series">
+      <span class="nav-icon">📺</span> 番剧名称规则
+    </a>
     <a href="#about" class="nav-item" data-target="about">
       <span class="nav-icon">ℹ️</span> 关于与帮助
     </a>
@@ -139,6 +142,28 @@
         </div>
       </div>
     </div>
+
+    <!-- 番剧规则页 -->
+    <div id="page-series" class="page-section">
+      <h2>自定义番剧名称 (Custom Series)</h2>
+      <div class="card">
+        <div class="desc">
+          在这里配置标题关键词，强制将番剧名称识别为指定的名字。<br>
+          适用于去除标题中的多余后缀，或修正识别错误的番剧名。
+        </div>
+
+        <div class="input-group">
+          <input type="text" id="seriesMatchInput" placeholder="匹配关键词 (例如: 鬼灭之刃)">
+          <input type="text" id="seriesNameInput" placeholder="目标番剧名 (例如: 鬼灭)">
+          <button id="btnAddSeriesRule" class="btn-primary">+ 添加规则</button>
+        </div>
+
+        <div class="rule-list" id="seriesListContainer">
+          <!-- 列表渲染区 -->
+        </div>
+      </div>
+    </div>
+
 
     <!-- 关于页 -->
     <div id="page-about" class="page-section">
