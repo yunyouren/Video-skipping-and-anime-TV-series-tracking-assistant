@@ -104,6 +104,9 @@ chrome.storage.onChanged.addListener((changes) => {
 
 // --- 【核心修改】自动匹配与开关控制 ---
 function checkAndApplyAutoMatch() {
+    const info = parseVideoInfo(); 
+    console.log("🔍 解析调试:", info.seriesName, "|", info.episodeName, "| 原标题:", document.title);
+
     // 1. 如果用户关了自动应用，直接退出（不做任何改变）
     if (!config.autoApplyPreset) return;
 
@@ -276,7 +279,26 @@ function parseVideoInfo(overrideTitle = null, overrideUrl = null) {
     if (!siteName) {
         siteName = strategy.name;
     }
-    // ============ 【修改结束】 ============
+
+    // =========== 【插入点：新增代码开始】 ===========
+    // 如果策略里定义了专属 parser (例如上面的 B站 parser)，直接使用它！
+    if (strategy.parser && !overrideTitle) { // 只有在非 iframe 消息传递时才使用 DOM 解析
+        const customInfo = strategy.parser();
+        if (customInfo) {
+            // 再次检查用户自定义的番剧名修正规则 (config.customSeriesRules)
+            let finalSeries = customInfo.seriesName;
+            if (config.customSeriesRules && Array.isArray(config.customSeriesRules)) {
+                for (const rule of config.customSeriesRules) {
+                    if (rule.match && rule.name && (url.includes(rule.match) || finalSeries.includes(rule.match))) {
+                        finalSeries = rule.name;
+                        break;
+                    }
+                }
+            }
+            return { seriesName: finalSeries, episodeName: customInfo.episodeName, siteName };
+        }
+    }
+    // =========== 【插入点：新增代码结束】 ===========
 
     let cleanTitle = rawTitle;
     
@@ -288,6 +310,8 @@ function parseVideoInfo(overrideTitle = null, overrideUrl = null) {
     // 应用通用清理逻辑
     cleanTitle = cleanTitle
         .replace(/-全集.*/i, "")
+        .replace(/_哔哩哔哩.*/i, "")
+        .replace(/_bilibili.*/i, "")
         .replace(/在线观看.*/i, "")
         .replace(/_在线观看.*/i, "")
         .replace(/_高清.*/i, "")
@@ -296,15 +320,37 @@ function parseVideoInfo(overrideTitle = null, overrideUrl = null) {
 
     cleanTitle = cleanTitle.replace(/[《》]/g, "");
 
+    // 1. 原有的标准匹配 (第x集 / Ep.x)
+    // 允许后面跟随空格或下划线开头的内容，或者是行尾
     const matchEpisode = cleanTitle.match(/(.*?)[\s-]*(第\s*\d+\s*[集话]|Ep\.?\s*\d+|Vol\.\d+)/i);
     
+    // 【修正】2. 特殊格式匹配规则 (支持 31~40)
+    // 修改点：去掉了末尾的 $，改为 (?:$|[\s_].*)
+    // 含义：数字范围后面，要么是结束，要么是 空格 或 下划线 开头的后缀
+    const matchRange = cleanTitle.match(/^(.*?)[\s\._-]*(\d+\s*[~-]\s*\d+)(?:$|[\s_].*)/);
+    
+    // 【修正】3. B站常见的 "分P" 格式 (P1, P2)
+    // 同样放宽了尾部限制
+    const matchPart = cleanTitle.match(/^(.*?)[\s\._-]*(P\d+)(?:$|[\s_].*)/i);
+
     if (matchEpisode) {
-        seriesName = matchEpisode[1].trim(); 
-        episodeName = matchEpisode[2].trim(); 
+        seriesName = matchEpisode[1].trim();
+        episodeName = matchEpisode[2].trim();
+    } else if (matchRange) {
+        // 命中 "战国31~40_哔哩哔哩"
+        // group[1] = 战国, group[2] = 31~40
+        seriesName = matchRange[1].trim();
+        episodeName = matchRange[2].trim();
+    } else if (matchPart) {
+        // 命中 "我的教程_P1_讲解"
+        seriesName = matchPart[1].trim();
+        episodeName = matchPart[2].trim();
     } else {
-        const parts = cleanTitle.split(/_| /); 
+        // 原有的兜底逻辑 (通过空格或下划线分割)
+        const parts = cleanTitle.split(/_| /);
         if (parts.length >= 2) {
             const lastPart = parts[parts.length - 1];
+            // ... (保持原有逻辑不变)
             if (/^\d+$/.test(lastPart) || lastPart.length < 5) {
                 episodeName = lastPart;
                 seriesName = cleanTitle.replace(lastPart, "").trim();
@@ -365,6 +411,46 @@ const SITE_STRATEGIES = [
     {
         domain: 'bilibili.com',
         name: 'B站',
+        // 【新增】自定义解析器：直接读 DOM，不依赖标题正则
+        parser: () => {
+            // 1. 锁定“系列名称” (Series):
+            // B站视频的总标题通常在 .video-title (新版) 或 H1 中，这个标题在切P时不会变
+            const h1 = document.querySelector('.video-title') || document.querySelector('#viewbox_report h1') || document.querySelector('h1');
+            // 如果获取不到 title 属性，就取 innerText
+            const seriesName = h1 ? (h1.title || h1.innerText).trim() : "";
+
+            // 2. 锁定“集数名称” (Episode):
+            let episodeName = "";
+            
+            // 尝试获取当前的分P号码 (URL中的 p 参数)
+            const pMatch = window.location.href.match(/[?&]p=(\d+)/);
+            const pNum = pMatch ? pMatch[1] : "1";
+
+            // 尝试从右侧分P列表里抓取当前高亮的标题
+            // 适配多种 B站 UI 结构 (.list-box .on 是旧版, .cur-list .on 是新版等)
+            const activeEl = document.querySelector('.list-box .on') || 
+                             document.querySelector('.cur-list .on') || 
+                             document.querySelector('.video-episode-card__info-title'); // 合集列表
+            
+            if (activeEl) {
+                // 列表里通常显示 "1 课程简介"，直接用这个
+                episodeName = activeEl.innerText.trim();
+            } else {
+                // 如果找不到列表（可能是单P视频），直接用 P+数字
+                episodeName = `P${pNum}`;
+                
+                // 如果是合集视频但没列表（极其罕见），尝试读副标题
+                const subTitle = document.title.split('_')[0];
+                if (subTitle && subTitle !== seriesName) {
+                     episodeName = `P${pNum} ${subTitle}`;
+                }
+            }
+
+            // 如果连系列名都找不到（非视频页），返回 null 走默认逻辑
+            if (!seriesName) return null;
+
+            return { seriesName, episodeName };
+        },
         clean: (title) => title.replace(/[_| -]bilibili.*/i, "").replace(/-国创.*/i, "").replace(/-番剧.*/i, "")
     },
     {
