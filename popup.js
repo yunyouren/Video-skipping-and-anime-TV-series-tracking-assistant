@@ -68,6 +68,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
         renderFolderSelect();
         
+        // 【新增】自动检测当前视频是否已收藏，并选中对应的文件夹
+        chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+            if (tabs.length === 0) return;
+            chrome.tabs.sendMessage(tabs[0].id, { action: "getNiceTitle" }, { frameId: 0 }, (titleResponse) => {
+                if (titleResponse && titleResponse.series) {
+                    const seriesName = titleResponse.series;
+                    const favItem = currentFavorites[seriesName];
+                    if (favItem && favItem.folder) {
+                        const select = document.getElementById('folderSelect');
+                        // 确保该文件夹在下拉列表中
+                        if (currentFolders.includes(favItem.folder)) {
+                            select.value = favItem.folder;
+                            // 重新渲染列表以显示该文件夹内容
+                            renderFavoritesList();
+                        }
+                    }
+                }
+            });
+        });
+        
         document.getElementById('folderSelect').addEventListener('change', () => {
             visibleCount = PAGE_SIZE; // 切换文件夹时重置
             renderFavoritesList(); 
