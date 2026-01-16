@@ -37,7 +37,8 @@ let config = {
     
     // 【新增】
     customTagRules: [],
-    customSeriesRules: []
+    customSeriesRules: [],
+    onlySaveMaxEpisode: false
 };
 
 let isSwitchingEpisode = false;
@@ -618,6 +619,29 @@ function autoUpdateFavorites(video, overrideTime = null, overrideDuration = null
     const existingItem = latestFavs[sName];
     if (Math.abs(existingItem.time - currentTime) < 2 && existingItem.url === window.location.href) {
         return; // 变化太小，跳过写入
+    }
+
+    // 【新增】: 仅记录最大阅读集数保护
+    // 如果用户开启了 "onlySaveMaxEpisode"，则需要判断集数是否倒退
+    if (config.onlySaveMaxEpisode && existingItem.episode) {
+        const getEpNum = (epStr) => {
+            if (!epStr) return -1;
+            const m = epStr.match(/(\d+)/); // 提取第一个数字
+            return m ? parseInt(m[1], 10) : -1;
+        };
+
+        const oldNum = getEpNum(existingItem.episode);
+        const newNum = getEpNum(info.episodeName);
+
+        // 只有当能够提取出有效数字时才进行比较
+        if (oldNum !== -1 && newNum !== -1) {
+            // 如果新集数 < 旧集数，则视为倒退，不更新记录
+            // 但如果集数相等，说明是同一集，允许更新进度
+            if (newNum < oldNum) {
+                // console.log(`Skipper: 忽略旧集数更新 (${newNum} < ${oldNum})`);
+                return;
+            }
+        }
     }
 
     // 构造新数据

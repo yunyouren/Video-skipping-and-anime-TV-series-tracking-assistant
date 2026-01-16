@@ -115,6 +115,9 @@
     <a href="#series" class="nav-item" data-target="series">
       <span class="nav-icon">📺</span> 番剧名称规则
     </a>
+    <a href="#settings" class="nav-item" data-target="settings">
+      <span class="nav-icon">⚙️</span> 高级设置
+    </a>
     <a href="#about" class="nav-item" data-target="about">
       <span class="nav-icon">ℹ️</span> 关于与帮助
     </a>
@@ -161,6 +164,27 @@
         <div class="rule-list" id="seriesListContainer">
           <!-- 列表渲染区 -->
         </div>
+      </div>
+    </div>
+
+    <!-- 高级设置页 -->
+    <div id="page-settings" class="page-section">
+      <h2>高级设置 (Advanced Settings)</h2>
+      <div class="card">
+        <div class="desc">
+            调整插件的核心行为逻辑。
+        </div>
+        <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; cursor: pointer;">
+                <input type="checkbox" id="chkOnlySaveMaxEpisode" style="margin-right: 10px; width: 16px; height: 16px;">
+                <span style="font-size: 14px;">仅记录最大阅读集数 (防止观看旧集数时覆盖进度)</span>
+            </label>
+            <div style="font-size: 12px; color: #999; margin-left: 26px; margin-top: 5px;">
+                开启后，只有当您观看的集数大于当前已保存的集数时，才会更新收藏记录。<br>
+                如果是同一集，则会正常更新观看时间进度。
+            </div>
+        </div>
+        <button id="btnSaveSettings" class="btn-primary">保存设置</button>
       </div>
     </div>
 

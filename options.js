@@ -6,10 +6,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // 加载数据
     loadRules();
     loadSeriesRules();
+    loadSettings();
 
     // 绑定事件
     document.getElementById('btnAddRule').addEventListener('click', addRule);
     document.getElementById('btnAddSeriesRule').addEventListener('click', addSeriesRule);
+    document.getElementById('btnSaveSettings').addEventListener('click', saveSettings);
 });
 
 // --- 路由逻辑 ---
@@ -17,7 +19,7 @@ function handleHashChange() {
     let hash = window.location.hash.substring(1) || 'rules'; // 默认路由
     
     // 简单的路由映射
-    const pages = ['rules', 'series', 'about'];
+    const pages = ['rules', 'series', 'settings', 'about'];
     if (!pages.includes(hash)) hash = 'rules';
 
     // 更新侧边栏状态
@@ -196,6 +198,20 @@ function deleteSeriesRule(index) {
                 showToast('规则已删除');
             });
         }
+    });
+}
+
+// --- 高级设置逻辑 ---
+function loadSettings() {
+    chrome.storage.local.get({ onlySaveMaxEpisode: false }, (items) => {
+        document.getElementById('chkOnlySaveMaxEpisode').checked = items.onlySaveMaxEpisode;
+    });
+}
+
+function saveSettings() {
+    const onlySaveMaxEpisode = document.getElementById('chkOnlySaveMaxEpisode').checked;
+    chrome.storage.local.set({ onlySaveMaxEpisode }, () => {
+        showToast('设置已保存');
     });
 }
 
