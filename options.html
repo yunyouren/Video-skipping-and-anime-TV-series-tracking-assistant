@@ -115,6 +115,9 @@
     <a href="#series" class="nav-item" data-target="series">
       <span class="nav-icon">📺</span> 番剧名称规则
     </a>
+    <a href="#favorites" class="nav-item" data-target="favorites">
+      <span class="nav-icon">📂</span> 收藏管理
+    </a>
     <a href="#settings" class="nav-item" data-target="settings">
       <span class="nav-icon">⚙️</span> 高级设置
     </a>
@@ -167,6 +170,35 @@
       </div>
     </div>
 
+    <!-- 收藏管理页 -->
+    <div id="page-favorites" class="page-section">
+      <h2>收藏管理 (Favorites Manager)</h2>
+      <div class="card">
+        <div class="desc">
+          查看和管理您的所有视频进度收藏。
+        </div>
+        
+        <div class="input-group" style="justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <div style="display: flex; gap: 10px; flex: 1;">
+                <select id="folderFilter" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px; min-width: 120px;">
+                    <option value="">所有文件夹</option>
+                </select>
+                <input type="text" id="favSearchInput" placeholder="搜索番剧名称..." style="flex: 1; min-width: 200px;">
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <button id="btnExportFavs" class="btn-primary" style="background-color: #52c41a;">导出</button>
+                <button id="btnImportFavs" class="btn-primary" style="background-color: #faad14;">导入</button>
+                <input type="file" id="importFile" style="display: none;" accept=".json">
+                <button id="btnClearAllFavs" class="btn-danger">清空</button>
+            </div>
+        </div>
+
+        <div class="rule-list" id="favListContainer" style="max-height: 600px;">
+          <!-- 列表渲染区 -->
+        </div>
+      </div>
+    </div>
+
     <!-- 高级设置页 -->
     <div id="page-settings" class="page-section">
       <h2>高级设置 (Advanced Settings)</h2>
@@ -213,6 +245,27 @@
   </div>
 
   <div id="toast">已保存</div>
+
+  <!-- 移动文件夹弹窗 -->
+  <div id="moveModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center;">
+      <div style="background: white; padding: 20px; border-radius: 8px; width: 300px; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
+          <h3 style="margin-top: 0;">移动到文件夹</h3>
+          <div style="margin-bottom: 15px;">
+              <label style="display: block; margin-bottom: 5px; font-size: 13px; color: #666;">选择已有文件夹：</label>
+              <select id="moveFolderSelect" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                  <option value="">(移出文件夹 / 无)</option>
+              </select>
+          </div>
+          <div style="margin-bottom: 20px;">
+              <label style="display: block; margin-bottom: 5px; font-size: 13px; color: #666;">或新建文件夹：</label>
+              <input type="text" id="moveNewFolderInput" placeholder="输入新文件夹名..." style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;">
+          </div>
+          <div style="text-align: right;">
+              <button id="btnCancelMove" style="background: #f0f0f0; color: #333; margin-right: 10px;">取消</button>
+              <button id="btnConfirmMove" class="btn-primary">确定</button>
+          </div>
+      </div>
+  </div>
 
   <script src="options.js"></script>
 </body>
