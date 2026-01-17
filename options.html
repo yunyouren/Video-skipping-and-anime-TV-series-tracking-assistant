@@ -108,21 +108,21 @@
 <body>
 
   <div class="sidebar">
-    <div class="app-title">⚡ 跳略助手</div>
+    <div class="app-title" data-i18n="popupTitle">⚡ 跳略助手</div>
     <a href="#rules" class="nav-item active" data-target="rules">
-      <span class="nav-icon">🏷️</span> 站点标签规则
+      <span class="nav-icon">🏷️</span> <span data-i18n="optionsNavRules">站点标签规则</span>
     </a>
     <a href="#series" class="nav-item" data-target="series">
-      <span class="nav-icon">📺</span> 番剧名称规则
+      <span class="nav-icon">📺</span> <span data-i18n="optionsNavSeries">番剧名称规则</span>
     </a>
     <a href="#favorites" class="nav-item" data-target="favorites">
-      <span class="nav-icon">📂</span> 收藏管理
+      <span class="nav-icon">📂</span> <span data-i18n="optionsNavFavs">收藏管理</span>
     </a>
     <a href="#settings" class="nav-item" data-target="settings">
-      <span class="nav-icon">⚙️</span> 高级设置
+      <span class="nav-icon">⚙️</span> <span data-i18n="optionsNavSettings">高级设置</span>
     </a>
     <a href="#about" class="nav-item" data-target="about">
-      <span class="nav-icon">ℹ️</span> 关于与帮助
+      <span class="nav-icon">ℹ️</span> <span data-i18n="optionsNavAbout">关于与帮助</span>
     </a>
   </div>
 
@@ -130,17 +130,17 @@
     
     <!-- 规则设置页 -->
     <div id="page-rules" class="page-section active">
-      <h2>自定义站点标签 (Custom Tags)</h2>
+      <h2 data-i18n="pageRulesTitle">自定义站点标签 (Custom Tags)</h2>
       <div class="card">
-        <div class="desc">
+        <div class="desc" data-i18n="pageRulesDesc">
           在这里配置域名或标题关键词，强制将视频识别为指定的站点标签。<br>
           适用于解决 Iframe 播放器域名变动导致被识别为 "Web" 的问题。优先级高于内置规则。
         </div>
 
         <div class="input-group">
-          <input type="text" id="tagMatchInput" placeholder="匹配关键词 (例如: yhdmp 或 player.html)">
+          <input type="text" id="tagMatchInput" placeholder="匹配关键词 (例如: yhdmp 或 player.html)" data-i18n-placeholder="matchPlaceholder">
           <input type="text" id="tagNameInput" placeholder="显示标签名 (例如: 樱花)">
-          <button id="btnAddRule" class="btn-primary">+ 添加规则</button>
+          <button id="btnAddRule" class="btn-primary" data-i18n="btnAddRule">+ 添加规则</button>
         </div>
 
         <div class="rule-list" id="ruleListContainer">
@@ -151,17 +151,17 @@
 
     <!-- 番剧规则页 -->
     <div id="page-series" class="page-section">
-      <h2>自定义番剧名称 (Custom Series)</h2>
+      <h2 data-i18n="pageSeriesTitle">自定义番剧名称 (Custom Series)</h2>
       <div class="card">
-        <div class="desc">
+        <div class="desc" data-i18n="pageSeriesDesc">
           在这里配置标题关键词，强制将番剧名称识别为指定的名字。<br>
           适用于去除标题中的多余后缀，或修正识别错误的番剧名。
         </div>
 
         <div class="input-group">
-          <input type="text" id="seriesMatchInput" placeholder="匹配关键词 (例如: 鬼灭之刃)">
+          <input type="text" id="seriesMatchInput" placeholder="匹配关键词 (例如: 鬼灭之刃)" data-i18n-placeholder="matchPlaceholder">
           <input type="text" id="seriesNameInput" placeholder="目标番剧名 (例如: 鬼灭)">
-          <button id="btnAddSeriesRule" class="btn-primary">+ 添加规则</button>
+          <button id="btnAddSeriesRule" class="btn-primary" data-i18n="btnAddSeriesRule">+ 添加规则</button>
         </div>
 
         <div class="rule-list" id="seriesListContainer">
@@ -172,24 +172,24 @@
 
     <!-- 收藏管理页 -->
     <div id="page-favorites" class="page-section">
-      <h2>收藏管理 (Favorites Manager)</h2>
+      <h2 data-i18n="pageFavsTitle">收藏管理 (Favorites Manager)</h2>
       <div class="card">
-        <div class="desc">
+        <div class="desc" data-i18n="pageFavsDesc">
           查看和管理您的所有视频进度收藏。
         </div>
         
         <div class="input-group" style="justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
             <div style="display: flex; gap: 10px; flex: 1;">
                 <select id="folderFilter" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px; min-width: 120px;">
-                    <option value="">所有文件夹</option>
+                    <option value="" data-i18n="defaultFolder">所有文件夹</option>
                 </select>
                 <input type="text" id="favSearchInput" placeholder="搜索番剧名称..." style="flex: 1; min-width: 200px;">
             </div>
             <div style="display: flex; gap: 10px;">
-                <button id="btnExportFavs" class="btn-primary" style="background-color: #52c41a;">导出</button>
-                <button id="btnImportFavs" class="btn-primary" style="background-color: #faad14;">导入</button>
+                <button id="btnExportFavs" class="btn-primary" style="background-color: #52c41a;" data-i18n="btnExport">导出</button>
+                <button id="btnImportFavs" class="btn-primary" style="background-color: #faad14;" data-i18n="btnImport">导入</button>
                 <input type="file" id="importFile" style="display: none;" accept=".json">
-                <button id="btnClearAllFavs" class="btn-danger">清空</button>
+                <button id="btnClearAllFavs" class="btn-danger" data-i18n="btnClearAll">清空</button>
             </div>
         </div>
 
@@ -201,29 +201,29 @@
 
     <!-- 高级设置页 -->
     <div id="page-settings" class="page-section">
-      <h2>高级设置 (Advanced Settings)</h2>
+      <h2 data-i18n="pageSettingsTitle">高级设置 (Advanced Settings)</h2>
       <div class="card">
-        <div class="desc">
+        <div class="desc" data-i18n="pageSettingsDesc">
             调整插件的核心行为逻辑。
         </div>
         <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; cursor: pointer;">
                 <input type="checkbox" id="chkOnlySaveMaxEpisode" style="margin-right: 10px; width: 16px; height: 16px;">
-                <span style="font-size: 14px;">仅记录最大阅读集数 (防止观看旧集数时覆盖进度)</span>
+                <span style="font-size: 14px;" data-i18n="chkOnlyMaxEp">仅记录最大阅读集数 (防止观看旧集数时覆盖进度)</span>
             </label>
-            <div style="font-size: 12px; color: #999; margin-left: 26px; margin-top: 5px;">
+            <div style="font-size: 12px; color: #999; margin-left: 26px; margin-top: 5px;" data-i18n="chkOnlyMaxEpDesc">
                 开启后，只有当您观看的集数大于当前已保存的集数时，才会更新收藏记录。<br>
                 如果是同一集，则会正常更新观看时间进度。
             </div>
         </div>
-        <button id="btnSaveSettings" class="btn-primary">保存设置</button>
+        <button id="btnSaveSettings" class="btn-primary" data-i18n="btnSave">保存设置</button>
       </div>
     </div>
 
 
     <!-- 关于页 -->
     <div id="page-about" class="page-section">
-      <h2>关于与帮助</h2>
+      <h2 data-i18n="pageAboutTitle">关于与帮助</h2>
       <div class="card">
         <h3>配置说明</h3>
         <div class="desc">
@@ -236,8 +236,8 @@
       </div>
       <div class="card">
         <div class="desc">
-          Version 3.1 <br>
-          © 2026 Bilibili Skipper
+          Version 4.0 <br>
+          © 2026 Video Skipper
         </div>
       </div>
     </div>
@@ -249,7 +249,7 @@
   <!-- 移动文件夹弹窗 -->
   <div id="moveModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center;">
       <div style="background: white; padding: 20px; border-radius: 8px; width: 300px; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
-          <h3 style="margin-top: 0;">移动到文件夹</h3>
+          <h3 style="margin-top: 0;" data-i18n="moveFolder">移动到文件夹</h3>
           <div style="margin-bottom: 15px;">
               <label style="display: block; margin-bottom: 5px; font-size: 13px; color: #666;">选择已有文件夹：</label>
               <select id="moveFolderSelect" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
@@ -261,8 +261,8 @@
               <input type="text" id="moveNewFolderInput" placeholder="输入新文件夹名..." style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;">
           </div>
           <div style="text-align: right;">
-              <button id="btnCancelMove" style="background: #f0f0f0; color: #333; margin-right: 10px;">取消</button>
-              <button id="btnConfirmMove" class="btn-primary">确定</button>
+              <button id="btnCancelMove" style="background: #f0f0f0; color: #333; margin-right: 10px;" data-i18n="cancel">取消</button>
+              <button id="btnConfirmMove" class="btn-primary" data-i18n="confirm">确定</button>
           </div>
       </div>
   </div>

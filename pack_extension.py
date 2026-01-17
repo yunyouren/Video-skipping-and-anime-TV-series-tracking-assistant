@@ -21,8 +21,8 @@ def pack_extension():
     # 动态生成文件名
     zip_filename = f"Video-skipping-and-anime-TV-series-tracking-assistant-v{version}.zip"
 
-    # 2. 需要打包的文件列表
-    files_to_zip = [
+    # 2. 需要打包的文件列表 (支持文件和文件夹)
+    items_to_zip = [
         "manifest.json",
         "background.js",
         "content.js",
@@ -31,7 +31,8 @@ def pack_extension():
         "options.html",
         "options.js",
         "icon.png",
-        "README.md"
+        "README.md",
+        "_locales"  # 新增：打包整个语言包目录
     ]
 
     # 3. 移除旧文件 (如果存在)
@@ -46,13 +47,23 @@ def pack_extension():
     print(f"正在创建: {zip_filename} ...")
     try:
         with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zf:
-            for file_path in files_to_zip:
-                if os.path.exists(file_path):
-                    # write(本地路径, 压缩包内的名称)
-                    zf.write(file_path, arcname=file_path)
-                    print(f"  + 添加: {file_path}")
+            for item in items_to_zip:
+                if os.path.isfile(item):
+                    # 如果是文件，直接添加
+                    zf.write(item, arcname=item)
+                    print(f"  + 添加文件: {item}")
+                elif os.path.isdir(item):
+                    # 如果是文件夹，递归添加
+                    print(f"  + 添加目录: {item}/")
+                    for root, dirs, files in os.walk(item):
+                        for file in files:
+                            file_path = os.path.join(root, file)
+                            # 在压缩包中的路径（保持相对结构）
+                            arcname = os.path.relpath(file_path, start='.')
+                            zf.write(file_path, arcname=arcname)
+                            print(f"    - {arcname}")
                 else:
-                    print(f"  ⚠️ 警告: 文件缺失 - {file_path}")
+                    print(f"  ⚠️ 警告: 文件/目录缺失 - {item}")
     except Exception as e:
         print(f"打包失败: {e}")
         sys.exit(1)

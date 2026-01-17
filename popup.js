@@ -761,18 +761,37 @@ function setupTagSettings(savedRules) {
         });
 
         // 绑定删除事件
-        document.querySelectorAll('.btn-del-rule').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const idx = e.target.dataset.idx;
-                rules.splice(idx, 1);
-                saveRules();
-                renderRules();
-            });
+    document.querySelectorAll('.btn-del-rule').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const idx = e.target.dataset.idx;
+            rules.splice(idx, 1);
+            saveRules();
+            renderRules();
         });
-    }
-
-    // 保存到 Storage
-    function saveRules() {
-        chrome.storage.local.set({ customTagRules: rules });
-    }
+    });
 }
+
+// 保存到 Storage
+function saveRules() {
+    chrome.storage.local.set({ customTagRules: rules });
+}
+}
+
+// --- 国际化 ---
+function localizeHtml() {
+    const elements = document.querySelectorAll('[data-i18n]');
+    elements.forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        const msg = chrome.i18n.getMessage(key);
+        if (msg) el.textContent = msg;
+    });
+
+    const placeholders = document.querySelectorAll('[data-i18n-placeholder]');
+    placeholders.forEach(el => {
+        const key = el.getAttribute('data-i18n-placeholder');
+        const msg = chrome.i18n.getMessage(key);
+        if (msg) el.placeholder = msg;
+    });
+}
+
+localizeHtml();

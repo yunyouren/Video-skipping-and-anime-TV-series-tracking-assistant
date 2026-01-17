@@ -25,6 +25,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // 弹窗事件
     document.getElementById('btnCancelMove').addEventListener('click', closeMoveModal);
     document.getElementById('btnConfirmMove').addEventListener('click', confirmMove);
+
+    localizeHtml();
 });
 
 // --- 路由逻辑 ---
@@ -589,4 +591,21 @@ function escapeHtml(text) {
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
+}
+
+// --- 国际化 ---
+function localizeHtml() {
+    const elements = document.querySelectorAll('[data-i18n]');
+    elements.forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        const msg = chrome.i18n.getMessage(key);
+        if (msg) el.textContent = msg;
+    });
+
+    const placeholders = document.querySelectorAll('[data-i18n-placeholder]');
+    placeholders.forEach(el => {
+        const key = el.getAttribute('data-i18n-placeholder');
+        const msg = chrome.i18n.getMessage(key);
+        if (msg) el.placeholder = msg;
+    });
 }
