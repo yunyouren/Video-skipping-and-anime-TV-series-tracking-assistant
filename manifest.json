@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "视频跳略与追番追剧助手",
-  "version": "3.0",
+  "version": "4.0",
   "description": "智能跳过片头片尾，支持追番收藏与快捷键控制。",
   "icons": {
     "16": "icon.png",
