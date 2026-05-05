@@ -445,13 +445,13 @@ const SITE_STRATEGIES = [
         name: 'B站',
         // 【新增】自定义解析器：直接读 DOM，不依赖标题正则
         parser: () => {
-            // 1. 锁定“系列名称” (Series):
+            // 1. 锁定"系列名称" (Series):
             // B站视频的总标题通常在 .video-title (新版) 或 H1 中，这个标题在切P时不会变
             const h1 = document.querySelector('.video-title') || document.querySelector('#viewbox_report h1') || document.querySelector('h1');
             // 如果获取不到 title 属性，就取 innerText
             const seriesName = h1 ? (h1.title || h1.innerText).trim() : "";
 
-            // 2. 锁定“集数名称” (Episode):
+            // 2. 锁定"集数名称" (Episode):
             let episodeName = "";
             
             // 尝试获取当前的分P号码 (URL中的 p 参数)
