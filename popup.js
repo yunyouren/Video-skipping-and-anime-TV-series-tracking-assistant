@@ -1,8 +1,8 @@
 // popup.js
 
 const defaultKeys = {
-    forward: { code: 'ArrowRight', shift: true, ctrl: false, alt: false, keyName: 'Shift + →' },
-    rewind: { code: 'ArrowLeft', shift: true, ctrl: false, alt: false, keyName: 'Shift + ←' }
+    forward: { code: 'ArrowRight', shift: true, ctrl: false, alt: false, keyName: 'Shift + Right' },
+    rewind: { code: 'ArrowLeft', shift: true, ctrl: false, alt: false, keyName: 'Shift + Left' }
 };
 
 const defaultFolders = ["默认收藏", "国漫", "日漫", "周一", "周二", "周三", "周四", "周五", "周六", "周日"];
@@ -137,7 +137,7 @@ document.addEventListener('DOMContentLoaded', () => {
              const folder = select.value;
 
              if (folder === "__ALL__") {
-                 alert("无法删除"全部展示"视图。\n请切换到具体文件夹后再执行删除操作。");
+                 alert('无法删除"全部展示"视图。\n请切换到具体文件夹后再执行删除操作。');
                  return;
              }
 
@@ -697,9 +697,9 @@ function setupKeyRecorder(elementId, saveCallback) {
         if (e.ctrlKey) keys.push('Ctrl');
         if (e.altKey) keys.push('Alt');
         if (e.shiftKey) keys.push('Shift');
-        let cleanKey = e.code.replace('Key', '').replace('Arrow', ''); 
-        if(e.code === 'ArrowRight') cleanKey = '→';
-        if(e.code === 'ArrowLeft') cleanKey = '←';
+        let cleanKey = e.code.replace('Key', '').replace('Arrow', '');
+        if(e.code === 'ArrowRight') cleanKey = 'Right';
+        if(e.code === 'ArrowLeft') cleanKey = 'Left';
         keys.push(cleanKey);
         input.value = keys.join(' + ');
         saveCallback({ code: e.code, shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey, keyName: input.value });
