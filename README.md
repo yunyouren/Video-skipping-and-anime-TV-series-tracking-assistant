@@ -1,7 +1,7 @@
 # ⚡ 视频跳略与追番追剧助手 (Video Skipper & Tracker)
 
 [![Manifest Version](https://img.shields.io/badge/Manifest-V3-blue?style=flat-square)](https://developer.chrome.com/docs/extensions/mv3/intro/)
-[![Version](https://img.shields.io/badge/Version-4.0-green?style=flat-square)](manifest.json)
+[![Version](https://img.shields.io/badge/Version-4.2-green?style=flat-square)](manifest.json)
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
 
 **全能视频跳略与追番助手** 是一款专为 Bilibili 及主流视频网站打造的 Chrome/Edge 浏览器扩展。它不仅能帮你自动跳过繁琐的片头片尾，还能像私人管家一样记录你的追番进度，让你享受无缝丝滑的观影体验。

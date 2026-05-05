@@ -18,6 +18,7 @@ let tempKeyRewind = null;
 let currentPresets = [];
 let currentFavorites = {};
 let currentFolders = [];
+let currentBlacklist = [];  // 【新增】黑名单列表
 let targetMoveSeries = null;
 let visibleCount = 20; // 当前显示数量
 const PAGE_SIZE = 20;  // 每次加载数量
@@ -30,9 +31,9 @@ document.addEventListener('DOMContentLoaded', () => {
         autoRestart: false,
         autoUpdateFav: true,
         autoApplyPreset: true,
-        
+
         // 新增：读取最后一次激活的方案名 (由 content.js 写入)
-        lastActivePreset: "",
+        lastActivePreset: “”,
 
         introTime: 90,
         outroTime: 0,
@@ -44,16 +45,19 @@ document.addEventListener('DOMContentLoaded', () => {
         savedPresets: defaultPresets,
         favorites: {},
         favFolders: defaultFolders,
-        customTagRules: []
+        customTagRules: [],
+        blacklistedSites: [],    // 【新增】黑名单
+        manualEnableSites: []    // 【新增】手动开启记录
     }, (items) => {
         // 优先初始化标签设置
-        try { setupTagSettings(items.customTagRules); } catch(e) { console.error("TagSettings Error:", e); }
+        try { setupTagSettings(items.customTagRules); } catch(e) { console.error(“TagSettings Error:”, e); }
 
         loadConfigToUI(items);
         currentPresets = items.savedPresets;
         currentFavorites = items.favorites;
         currentFolders = items.favFolders;
-        
+        currentBlacklist = items.blacklistedSites || [];
+
         document.getElementById('autoUpdateFav').checked = items.autoUpdateFav;
         document.getElementById('autoApplyPreset').checked = items.autoApplyPreset;
 
@@ -67,11 +71,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         renderFolderSelect();
-        
+
         // 【新增】自动检测当前视频是否已收藏，并选中对应的文件夹
         chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
             if (tabs.length === 0) return;
-            chrome.tabs.sendMessage(tabs[0].id, { action: "getNiceTitle" }, { frameId: 0 }, (titleResponse) => {
+            chrome.tabs.sendMessage(tabs[0].id, { action: “getNiceTitle” }, { frameId: 0 }, (titleResponse) => {
                 if (titleResponse && titleResponse.series) {
                     const seriesName = titleResponse.series;
                     const favItem = currentFavorites[seriesName];
@@ -84,46 +88,96 @@ document.addEventListener('DOMContentLoaded', () => {
                             renderFavoritesList();
                         }
                     }
+
+                    // 【新增】显示当前站点信息，用于黑名单功能
+                    const currentSite = titleResponse.site || 'Web';
+                    const currentUrl = titleResponse.url || '';
+                    const blacklistRow = document.getElementById('blacklistRow');
+                    const currentSiteLabel = document.getElementById('currentSiteLabel');
+                    const blacklistBtn = document.getElementById('btnBlacklistSite');
+
+                    if (blacklistRow && currentSiteLabel && currentSite !== 'Web') {
+                        blacklistRow.style.display = 'flex';
+                        currentSiteLabel.textContent = `当前站点: ${currentSite}`;
+
+                        // 检查是否已在黑名单中
+                        const isBlacklisted = currentBlacklist.some(site =>
+                            currentUrl.includes(site) || currentSite.includes(site)
+                        );
+                        if (isBlacklisted) {
+                            blacklistBtn.textContent = '✓ 已屏蔽';
+                            blacklistBtn.disabled = true;
+                            blacklistBtn.style.background = '#f5f5f5';
+                            blacklistBtn.style.color = '#999';
+                        } else {
+                            blacklistBtn.textContent = '🚫 屏蔽此站';
+                            blacklistBtn.disabled = false;
+                        }
+                    }
                 }
             });
         });
-        
+
         document.getElementById('folderSelect').addEventListener('change', () => {
             visibleCount = PAGE_SIZE; // 切换文件夹时重置
-            renderFavoritesList(); 
+            renderFavoritesList();
         });
 
         document.getElementById('newFolderBtn').addEventListener('click', () => {
-            const name = prompt("请输入新收藏夹名称 (例如: 补番中):");
+            const name = prompt(“请输入新收藏夹名称 (例如: 补番中):”);
             if (name && !currentFolders.includes(name)) {
                 currentFolders.push(name);
                 saveFolders();
                 renderFolderSelect(name);
             }
         });
-        
+
         document.getElementById('delFolderBtn').addEventListener('click', () => {
              const select = document.getElementById('folderSelect');
              const folder = select.value;
-             
-             if (folder === "__ALL__") {
-                 alert("无法删除“全部展示”视图。\n请切换到具体文件夹后再执行删除操作。");
+
+             if (folder === “__ALL__”) {
+                 alert(“无法删除”全部展示”视图。\n请切换到具体文件夹后再执行删除操作。”);
                  return;
              }
 
-             if (folder === "默认收藏") {
-                 alert("无法删除默认收藏夹");
+             if (folder === “默认收藏”) {
+                 alert(“无法删除默认收藏夹”);
                  return;
              }
-             if (confirm(`删除文件夹 "${folder}"？\n其中的番剧将移动到 "默认收藏"。`)) {
+             if (confirm(`删除文件夹 “${folder}”？\n其中的番剧将移动到 “默认收藏”。`)) {
                  Object.values(currentFavorites).forEach(item => {
-                     if (item.folder === folder) item.folder = "默认收藏";
+                     if (item.folder === folder) item.folder = “默认收藏”;
                  });
                  currentFolders = currentFolders.filter(f => f !== folder);
                  saveDataAndRender();
                  saveFolders();
-                 renderFolderSelect("默认收藏");
+                 renderFolderSelect(“默认收藏”);
              }
+        });
+
+        // 【新增】屏蔽当前站点按钮事件
+        document.getElementById('btnBlacklistSite')?.addEventListener('click', () => {
+            chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+                if (tabs.length === 0) return;
+                chrome.tabs.sendMessage(tabs[0].id, { action: “getNiceTitle” }, { frameId: 0 }, (res) => {
+                    if (res && res.site) {
+                        const siteKeyword = res.site;
+                        if (!currentBlacklist.includes(siteKeyword)) {
+                            currentBlacklist.push(siteKeyword);
+                            chrome.storage.local.set({ blacklistedSites: currentBlacklist }, () => {
+                                showFloatingToast(`✅ 已屏蔽站点: ${siteKeyword}\n刷新页面生效`);
+                                // 更新按钮状态
+                                const btn = document.getElementById('btnBlacklistSite');
+                                btn.textContent = '✓ 已屏蔽';
+                                btn.disabled = true;
+                                btn.style.background = '#f5f5f5';
+                                btn.style.color = '#999';
+                            });
+                        }
+                    }
+                });
+            });
         });
 
         renderPresetDropdown();
@@ -678,7 +732,39 @@ const switches = ['autoSkipEnable', 'enableIntro', 'enableOutro', 'autoRestart',
 switches.forEach(id => {
     document.getElementById(id).addEventListener('change', (e) => {
         let data = {}; data[id] = e.target.checked;
-        chrome.storage.local.set(data, () => { if(id === 'autoSkipEnable') updateStatusText(e.target.checked); });
+
+        // 【新增】当用户手动切换主开关时，记录/移除当前站点
+        if (id === 'autoSkipEnable') {
+            updateStatusText(e.target.checked);
+
+            chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+                if (tabs.length === 0) return;
+                chrome.tabs.sendMessage(tabs[0].id, { action: "getNiceTitle" }, { frameId: 0 }, (res) => {
+                    if (res && res.site && res.site !== 'Web') {
+                        const currentSite = res.site;
+                        chrome.storage.local.get({ manualEnableSites: [] }, (items) => {
+                            let manualList = items.manualEnableSites || [];
+
+                            if (e.target.checked) {
+                                // 用户手动开启：添加到手动开启列表
+                                if (!manualList.includes(currentSite)) {
+                                    manualList.push(currentSite);
+                                }
+                            } else {
+                                // 用户手动关闭：从手动开启列表移除
+                                manualList = manualList.filter(s => s !== currentSite);
+                            }
+
+                            chrome.storage.local.set({ manualEnableSites: manualList, ...data });
+                        });
+                    } else {
+                        chrome.storage.local.set(data);
+                    }
+                });
+            });
+        } else {
+            chrome.storage.local.set(data);
+        }
     });
 });
 function updateStatusText(isEnabled) {

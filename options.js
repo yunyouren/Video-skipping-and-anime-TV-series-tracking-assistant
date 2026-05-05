@@ -6,14 +6,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // 加载数据
     loadRules();
     loadSeriesRules();
+    loadBlacklist();  // 【新增】
     loadSettings();
     loadFavorites();
 
     // 绑定事件
     document.getElementById('btnAddRule').addEventListener('click', addRule);
     document.getElementById('btnAddSeriesRule').addEventListener('click', addSeriesRule);
+    document.getElementById('btnAddBlacklist').addEventListener('click', addBlacklist);  // 【新增】
     document.getElementById('btnSaveSettings').addEventListener('click', saveSettings);
-    
+
     // 收藏管理事件
     document.getElementById('favSearchInput').addEventListener('input', filterFavorites);
     document.getElementById('folderFilter').addEventListener('change', filterFavorites);
@@ -32,9 +34,9 @@ document.addEventListener('DOMContentLoaded', () => {
 // --- 路由逻辑 ---
 function handleHashChange() {
     let hash = window.location.hash.substring(1) || 'rules'; // 默认路由
-    
+
     // 简单的路由映射
-    const pages = ['rules', 'series', 'favorites', 'settings', 'about'];
+    const pages = ['rules', 'series', 'blacklist', 'favorites', 'settings', 'about'];  // 【新增】blacklist
     if (!pages.includes(hash)) hash = 'rules';
 
     // 更新侧边栏状态
@@ -211,6 +213,82 @@ function deleteSeriesRule(index) {
             chrome.storage.local.set({ customSeriesRules: rules }, () => {
                 renderSeriesList(rules);
                 showToast('规则已删除');
+            });
+        }
+    });
+}
+
+// --- 【新增】黑名单逻辑 ---
+function loadBlacklist() {
+    chrome.storage.local.get({ blacklistedSites: [] }, (items) => {
+        renderBlacklist(items.blacklistedSites);
+    });
+}
+
+function renderBlacklist(sites) {
+    const container = document.getElementById('blacklistContainer');
+    if (!container) return;
+
+    container.innerHTML = '';
+
+    if (!sites || sites.length === 0) {
+        container.innerHTML = '<div class="empty-tip">暂无屏蔽网站，在弹窗中点击"屏蔽此站"按钮可快速添加。</div>';
+        return;
+    }
+
+    sites.forEach((site, index) => {
+        const div = document.createElement('div');
+        div.className = 'rule-item';
+        div.innerHTML = `
+            <div style="display:flex; align-items:center;">
+                <span style="color: #ff4d4f; font-weight: bold;">🚫 ${escapeHtml(site)}</span>
+            </div>
+            <button class="btn-danger btn-del-blacklist" data-index="${index}">移除</button>
+        `;
+        container.appendChild(div);
+    });
+
+    // 绑定删除事件
+    document.querySelectorAll('.btn-del-blacklist').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const index = parseInt(e.target.dataset.index);
+            deleteBlacklist(index);
+        });
+    });
+}
+
+function addBlacklist() {
+    const input = document.getElementById('blacklistInput');
+    const site = input.value.trim();
+
+    if (!site) {
+        showToast('请输入要屏蔽的关键词', true);
+        return;
+    }
+
+    chrome.storage.local.get({ blacklistedSites: [] }, (items) => {
+        const sites = items.blacklistedSites;
+        if (sites.includes(site)) {
+            showToast(`"${site}" 已在黑名单中`, true);
+            return;
+        }
+        sites.push(site);
+        chrome.storage.local.set({ blacklistedSites: sites }, () => {
+            input.value = '';
+            renderBlacklist(sites);
+            showToast('已添加到黑名单');
+        });
+    });
+}
+
+function deleteBlacklist(index) {
+    chrome.storage.local.get({ blacklistedSites: [] }, (items) => {
+        const sites = items.blacklistedSites;
+        if (index >= 0 && index < sites.length) {
+            const removed = sites.splice(index, 1);
+            chrome.storage.local.set({ blacklistedSites: sites }, () => {
+                renderBlacklist(sites);
+                showToast(`已移除: ${removed[0]}`);
             });
         }
     });

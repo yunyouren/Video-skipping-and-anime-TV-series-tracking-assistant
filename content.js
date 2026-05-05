@@ -34,11 +34,13 @@ let config = {
     keyRewind: { code: 'ArrowLeft', shift: true, ctrl: false, alt: false },
     savedPresets: [],
     favorites: {},
-    
+
     // 【新增】
     customTagRules: [],
     customSeriesRules: [],
-    onlySaveMaxEpisode: false
+    onlySaveMaxEpisode: false,
+    blacklistedSites: [],    // 【新增】黑名单网站列表
+    manualEnableSites: []    // 【新增】记录用户手动开启的站点
 };
 
 let isSwitchingEpisode = false;
@@ -105,18 +107,49 @@ chrome.storage.onChanged.addListener((changes) => {
 
 // --- 【核心修改】自动匹配与开关控制 ---
 function checkAndApplyAutoMatch() {
-    const info = parseVideoInfo(); 
-    console.log("🔍 解析调试:", info.seriesName, "|", info.episodeName, "| 原标题:", document.title);
+    const info = parseVideoInfo();
+    const currentUrl = window.location.href;
+    const currentSite = info.siteName;
 
-    // 1. 如果用户关了自动应用，直接退出（不做任何改变）
-    if (!config.autoApplyPreset) return;
+    console.log("🔍 解析调试:", info.seriesName, "|", info.episodeName, "| 站点:", currentSite);
+
+    // 【新增】1. 黑名单检测：如果当前站点在黑名单中，强制禁用并退出
+    if (config.blacklistedSites && config.blacklistedSites.length > 0) {
+        const isBlacklisted = config.blacklistedSites.some(site => {
+            return currentUrl.includes(site) || currentSite.includes(site) || document.title.includes(site);
+        });
+        if (isBlacklisted) {
+            console.log("Skipper: 当前站点在黑名单中，已禁用");
+            if (config.autoSkipEnable) {
+                config.autoSkipEnable = false;
+                chrome.storage.local.set({ autoSkipEnable: false, lastActivePreset: "🚫 黑名单屏蔽" });
+            }
+            showToast(`🚫 当前站点已被屏蔽`);
+            return;
+        }
+    }
+
+    // 2. 如果用户关了自动应用，检查是否是用户手动开启的站点
+    if (!config.autoApplyPreset) {
+        // 【新增】检查用户手动开启记录：如果当前站点在手动开启列表中，保持开启状态
+        if (config.manualEnableSites && config.manualEnableSites.length > 0) {
+            const isManualEnabled = config.manualEnableSites.some(site => {
+                return currentUrl.includes(site) || currentSite.includes(site);
+            });
+            if (isManualEnabled && !config.autoSkipEnable) {
+                config.autoSkipEnable = true;
+                chrome.storage.local.set({ autoSkipEnable: true, lastActivePreset: "✋ 用户手动开启" });
+                showToast(`⚡ 已恢复开启状态`);
+            }
+        }
+        return;
+    }
 
     if (!config.savedPresets || config.savedPresets.length === 0) return;
-    
-    const currentUrl = window.location.href;
-    const currentTitle = document.title; 
 
-    // 2. 寻找匹配项
+    const currentTitle = document.title;
+
+    // 3. 寻找匹配项
     const matchedPreset = config.savedPresets.find(p => {
         if (!p.domain || p.domain.trim() === "") return false;
         const keyword = p.domain.trim();
@@ -126,9 +159,9 @@ function checkAndApplyAutoMatch() {
     if (matchedPreset) {
         // --- 匹配成功：自动开启并应用 ---
         console.log("Skipper: 匹配成功 ->", matchedPreset.name);
-        
+
         // 更新内存配置
-        config.autoSkipEnable = true; // 强制开启
+        config.autoSkipEnable = true;
         config.introTime = matchedPreset.intro;
         config.outroTime = matchedPreset.outro;
         config.autoRestart = matchedPreset.restart;
@@ -136,7 +169,7 @@ function checkAndApplyAutoMatch() {
         config.enableIntro = (matchedPreset.intro > 0);
         config.enableOutro = (matchedPreset.outro > 0);
 
-        // 持久化保存 (让Popup能看到变化)
+        // 持久化保存
         chrome.storage.local.set({
             autoSkipEnable: true,
             introTime: matchedPreset.intro,
@@ -145,22 +178,20 @@ function checkAndApplyAutoMatch() {
             autoPlayNext: matchedPreset.next,
             enableIntro: (matchedPreset.intro > 0),
             enableOutro: (matchedPreset.outro > 0),
-            lastActivePreset: matchedPreset.name // 记录名字供Popup显示
+            lastActivePreset: matchedPreset.name
         });
 
         showToast(`⚡ 已激活方案: ${matchedPreset.name}`);
 
     } else {
-        // --- 匹配失败：自动关闭 ---
-        // 只有当之前是开启状态时，才去关闭它，避免重复写入
-        if (config.autoSkipEnable === true) {
-            console.log("Skipper: 无匹配方案，自动关闭");
-            config.autoSkipEnable = false;
-            
-            chrome.storage.local.set({
-                autoSkipEnable: false,
-                lastActivePreset: "" // 清空显示
-            });
+        // --- 匹配失败 ---
+        // 【修改】不再强制关闭，而是提示用户手动控制
+        // 仅在首次检测时提示，避免反复骚扰
+        if (config.autoSkipEnable === true && !config._hasShownNoMatchTip) {
+            config._hasShownNoMatchTip = true;
+            console.log("Skipper: 无匹配方案，保持当前开关状态");
+            showToast(`ℹ️ 无预设方案，请手动控制开关`);
+            // 不改变 autoSkipEnable 状态，让用户自主决定
         }
     }
 }
