@@ -89,6 +89,19 @@ document.addEventListener('DOMContentLoaded', () => {
                             // 重新渲染列表以显示该文件夹内容
                             renderFavoritesList();
                         }
+
+                        // 【新增】加载该收藏的专属跳过设置到 UI
+                        if (favItem.introTime !== undefined) {
+                            document.getElementById('introTime').value = favItem.introTime;
+                            document.getElementById('enableIntro').checked = (favItem.introTime > 0);
+                        }
+                        if (favItem.outroTime !== undefined) {
+                            document.getElementById('outroTime').value = favItem.outroTime;
+                            document.getElementById('enableOutro').checked = (favItem.outroTime > 0);
+                        }
+                        if (favItem.minDuration !== undefined) {
+                            document.getElementById('minDuration').value = favItem.minDuration;
+                        }
                     }
 
                     // 【新增】显示当前站点信息，用于黑名单功能
@@ -396,7 +409,20 @@ document.getElementById('addFavBtn').addEventListener('click', () => {
                 }
                 
                 finalData.folder = targetFolder;
-                
+
+                // 【新增】保存当前跳过设置到该收藏
+                finalData.introTime = parseInt(document.getElementById('introTime').value) || 0;
+                finalData.outroTime = parseInt(document.getElementById('outroTime').value) || 0;
+                finalData.minDuration = parseInt(document.getElementById('minDuration').value) || 0;
+
+                // 合并旧数据中的自定义设置
+                if (currentFavorites[finalData.series]) {
+                    const old = currentFavorites[finalData.series];
+                    if (old.introTime !== undefined) finalData.introTime = old.introTime;
+                    if (old.outroTime !== undefined) finalData.outroTime = old.outroTime;
+                    if (old.minDuration !== undefined) finalData.minDuration = old.minDuration;
+                }
+
                 currentFavorites[finalData.series] = finalData;
                 chrome.storage.local.set({ favorites: currentFavorites }, () => {
                     renderFavoritesList();
@@ -734,7 +760,20 @@ document.getElementById('saveBtn').addEventListener('click', () => {
         favorites: currentFavorites,
         favFolders: currentFolders
     };
-    chrome.storage.local.set(config, () => { showTempMessage('✅ 配置已保存'); });
+
+    // 【新增】保存时同步更新当前已收藏视频的专属设置
+    chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+        if (tabs.length > 0) {
+            chrome.tabs.sendMessage(tabs[0].id, { action: "getNiceTitle" }, { frameId: 0 }, (res) => {
+                if (res && res.series && config.favorites[res.series]) {
+                    config.favorites[res.series].introTime = config.introTime;
+                    config.favorites[res.series].outroTime = config.outroTime;
+                    config.favorites[res.series].minDuration = config.minDuration;
+                }
+                chrome.storage.local.set(config, () => { showTempMessage('✅ 配置已保存'); });
+            });
+        }
+    });
 });
 const switches = ['autoSkipEnable', 'enableIntro', 'enableOutro', 'autoRestart', 'autoPlayNext'];
 switches.forEach(id => {

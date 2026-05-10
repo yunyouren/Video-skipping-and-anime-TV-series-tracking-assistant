@@ -738,48 +738,66 @@ function handleTimeUpdate(e) {
     if (config.autoSkipEnable !== true) return;
     if (video.duration < config.minDuration) return;
 
-    // 【新增】白名单模式：仅对已收藏的番剧执行跳过
+    // 【新增】白名单模式：仅对已收藏的番剧执行跳过，并应用每个收藏的专属设置
+    let currentIntro = config.introTime;
+    let currentOutro = config.outroTime;
+    let currentMinDuration = config.minDuration;
+    let currentEnableIntro = config.enableIntro;
+    let currentEnableOutro = config.enableOutro;
+
     if (config.whitelistMode === true) {
         const info = getCachedVideoInfo();
-        const hasFav = config.favorites && config.favorites[info.seriesName];
-        if (!hasFav) return; // 未收藏的视频不执行跳过
+        const fav = config.favorites && config.favorites[info.seriesName];
+        if (!fav) return; // 未收藏的视频不执行跳过
+
+        // 使用该收藏专属的设置（如果已保存）
+        if (fav.introTime !== undefined) {
+            currentIntro = fav.introTime;
+            currentEnableIntro = (fav.introTime > 0);
+        }
+        if (fav.outroTime !== undefined) {
+            currentOutro = fav.outroTime;
+            currentEnableOutro = (fav.outroTime > 0);
+        }
+        if (fav.minDuration !== undefined) currentMinDuration = fav.minDuration;
     }
+
+    if (video.duration < currentMinDuration) return;
 
     if (config.autoRestart === true && !hasTriggeredRestart) {
         if (Date.now() - videoLoadStartTime < 4000) {
             const timeLeft = video.duration - video.currentTime;
             if (timeLeft < 30 || video.currentTime / video.duration > 0.95) {
-                const outroTriggerTime = video.duration - (config.enableOutro ? config.outroTime : 0);
-                let targetPos = config.enableIntro ? config.introTime : 0;
-                if (targetPos >= outroTriggerTime) { targetPos = 0; }
+                const outroTrigger = video.duration - (currentEnableOutro ? currentOutro : 0);
+                let targetPos = currentEnableIntro ? currentIntro : 0;
+                if (targetPos >= outroTrigger) { targetPos = 0; }
                 video.currentTime = targetPos;
                 showToast(`↺ 已重置到 ${targetPos}秒`);
                 hasTriggeredRestart = true;
                 hasSkippedIntro = true;
-                restartCooldownTime = Date.now() + 5000; 
+                restartCooldownTime = Date.now() + 5000;
             }
         }
     }
 
-    const outroTriggerTime = video.duration - (config.enableOutro ? config.outroTime : 0);
-    const targetIntroTime = config.introTime;
-    const isOverlap = targetIntroTime >= outroTriggerTime;
+    const outroTriggerTime = video.duration - (currentEnableOutro ? currentOutro : 0);
+    const isOverlap = currentIntro >= outroTriggerTime;
 
-    if (config.enableIntro === true && !isOverlap) { 
-        if (video.currentTime < targetIntroTime && !hasSkippedIntro && video.currentTime > 0.5) {
+    if (currentEnableIntro === true && !isOverlap) {
+        if (video.currentTime < currentIntro && !hasSkippedIntro && video.currentTime > 0.5) {
              if (Date.now() < restartCooldownTime) {
-                 hasSkippedIntro = true; 
-             } else if (targetIntroTime < video.duration) {
-                video.currentTime = targetIntroTime;
+                 hasSkippedIntro = true;
+             } else if (currentIntro < video.duration) {
+                video.currentTime = currentIntro;
                 hasSkippedIntro = true;
                 showToast(`🚀 跳过片头`);
             }
         }
     }
 
-    if (config.enableOutro === true) {
+    if (currentEnableOutro === true) {
         if (Date.now() < restartCooldownTime) return;
-        if (config.outroTime > 0) {
+        if (currentOutro > 0) {
             if (video.currentTime > outroTriggerTime && video.currentTime < video.duration) {
                 if (Date.now() - videoLoadStartTime < 4000 && !hasTriggeredRestart) return;
                 if (isSwitchingEpisode) return;
