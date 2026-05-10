@@ -1,6 +1,13 @@
 // background.js
 
-// 只保留消息监听，移除 onInstalled 和 onUpdated 中的 executeScript 逻辑
+// 安装/更新时设置首次提示标记
+chrome.runtime.onInstalled.addListener((details) => {
+    if (details.reason === 'install' || details.reason === 'update') {
+        chrome.storage.local.set({ showWhitelistNotice: true });
+    }
+});
+
+// 消息监听
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     // 1. 处理获取 Tab 标题
     if (request.action === "getTabTitle") {
@@ -19,5 +26,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 duration: request.duration
             }, { frameId: 0 });
         }
+    }
+
+    // 3. 打开选项页
+    if (request.action === "openOptionsPage") {
+        chrome.runtime.openOptionsPage();
     }
 });

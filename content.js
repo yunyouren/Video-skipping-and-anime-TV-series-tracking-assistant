@@ -94,6 +94,12 @@ chrome.storage.local.get(config, (items) => {
     // 页面加载时执行一次匹配
     checkAndApplyAutoMatch();
 
+    // 首次安装/更新后提示白名单模式
+    if (config.showWhitelistNotice === true) {
+        showWhitelistNotification();
+        chrome.storage.local.set({ showWhitelistNotice: false });
+    }
+
     window.addEventListener('keydown', onKeyHandler, true);
     if (!window.biliMonitorInterval) startMonitoring();
 });
@@ -795,6 +801,52 @@ function handleTimeUpdate(e) {
 }
 
 let toastTimeout;
+function showWhitelistNotification() {
+    let notice = document.getElementById('bili-skipper-notice');
+    if (!notice) {
+        notice = document.createElement('div');
+        notice.id = 'bili-skipper-notice';
+        notice.style.cssText = `
+            position: fixed; bottom: 20px; right: 20px; z-index: 2147483646;
+            background: #fff; border: 2px solid #722ed1; border-radius: 12px;
+            padding: 16px 20px; max-width: 340px;
+            font-family: "Segoe UI", sans-serif; font-size: 13px; color: #333;
+            box-shadow: 0 4px 20px rgba(114, 46, 209, 0.15);
+            line-height: 1.5;
+        `;
+        notice.innerHTML = `
+            <div style="display:flex; align-items:center; margin-bottom:8px;">
+                <span style="font-size:18px; margin-right:8px;">🎯</span>
+                <strong style="color:#722ed1; font-size:14px;">白名单模式已启用</strong>
+            </div>
+            <div style="font-size:12px; color:#666; margin-bottom:12px;">
+                自动跳过仅对<strong>已收藏的番剧</strong>生效。<br>
+                未收藏的视频不会触发跳过行为。
+            </div>
+            <div style="display:flex; gap:8px;">
+                <button id="bili-notice-gotit" style="background:#722ed1; color:#fff; border:none;
+                    padding:6px 16px; border-radius:6px; cursor:pointer; font-size:12px;">知道了</button>
+                <button id="bili-notice-settings" style="background:#f0f0f0; color:#333; border:none;
+                    padding:6px 16px; border-radius:6px; cursor:pointer; font-size:12px;">修改设置</button>
+            </div>
+        `;
+        document.body.appendChild(notice);
+
+        document.getElementById('bili-notice-gotit').addEventListener('click', () => {
+            notice.style.opacity = '0';
+            notice.style.transition = 'opacity 0.3s';
+            setTimeout(() => notice.remove(), 300);
+        });
+
+        document.getElementById('bili-notice-settings').addEventListener('click', () => {
+            chrome.runtime.sendMessage({ action: 'openOptionsPage' });
+            notice.style.opacity = '0';
+            notice.style.transition = 'opacity 0.3s';
+            setTimeout(() => notice.remove(), 300);
+        });
+    }
+}
+
 function showToast(text) {
     let toast = document.getElementById('bili-skipper-toast');
     if (!toast) {
