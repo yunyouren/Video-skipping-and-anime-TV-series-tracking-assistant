@@ -657,7 +657,7 @@ document.getElementById('applyPresetBtn').addEventListener('click', () => {
     if (index === "") return showTempMessage("请先选择预设", "red");
     const p = currentPresets[index];
     loadPresetToUI(p);
-    document.getElementById('saveBtn').click();
+    chrome.storage.local.set({ savedPresets: currentPresets });
     showTempMessage(`已加载: ${p.name}`);
 });
 document.getElementById('addPresetBtn').addEventListener('click', () => {
@@ -791,29 +791,7 @@ setupKeyRecorder('keyRewind', (keyData) => {
     autoSaveSettings('keyRewind', keyData);
 });
 
-// saveBtn 仅用于保存预设方案和收藏数据
-document.getElementById('saveBtn').addEventListener('click', () => {
-    const config = {
-        autoSkipEnable: document.getElementById('autoSkipEnable').checked,
-        enableIntro: document.getElementById('enableIntro').checked,
-        enableOutro: document.getElementById('enableOutro').checked,
-        autoRestart: document.getElementById('autoRestart').checked,
-        autoPlayNext: document.getElementById('autoPlayNext').checked,
-        introTime: parseInt(document.getElementById('introTime').value) || 0,
-        outroTime: parseInt(document.getElementById('outroTime').value) || 0,
-        manualSkipTime: parseInt(document.getElementById('manualSkipTime').value) || 90,
-        minDuration: parseInt(document.getElementById('minDuration').value) || 0,
-        keyForward: tempKeyForward || defaultKeys.forward,
-        keyRewind: tempKeyRewind || defaultKeys.rewind,
-        autoUpdateFav: document.getElementById('autoUpdateFav').checked,
-        autoApplyPreset: document.getElementById('autoApplyPreset').checked,
-        whitelistMode: document.getElementById('whitelistMode').checked,
-        savedPresets: currentPresets,
-        favorites: currentFavorites,
-        favFolders: currentFolders
-    };
-    chrome.storage.local.set(config, () => { showTempMessage('✅ 配置已保存'); });
-});
+// 所有设置已改为自动保存，无需手动点击
 const switches = ['autoSkipEnable', 'enableIntro', 'enableOutro', 'autoRestart', 'autoPlayNext'];
 switches.forEach(id => {
     document.getElementById(id).addEventListener('change', (e) => {
