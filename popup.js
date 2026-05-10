@@ -7,21 +7,14 @@ const defaultKeys = {
 
 const defaultFolders = ["默认收藏", "国漫", "日漫", "周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 
-const defaultPresets = [
-    { name: "B站标准 (自动)", intro: 90, outro: 0, restart: false, next: false, domain: "bilibili" },
-    { name: "爱奇艺 (自动)", intro: 120, outro: 30, restart: true, next: true, domain: "iqiyi" },
-    { name: "腾讯视频 (自动)", intro: 110, outro: 15, restart: true, next: true, domain: "v.qq.com" }
-];
-
 let tempKeyForward = null;
 let tempKeyRewind = null;
-let currentPresets = [];
 let currentFavorites = {};
 let currentFolders = [];
-let currentBlacklist = [];  // 【新增】黑名单列表
+let currentBlacklist = [];
 let targetMoveSeries = null;
-let visibleCount = 20; // 当前显示数量
-const PAGE_SIZE = 20;  // 每次加载数量
+let visibleCount = 20;
+const PAGE_SIZE = 20;
 
 document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.local.get({
@@ -30,10 +23,6 @@ document.addEventListener('DOMContentLoaded', () => {
         enableOutro: true,
         autoRestart: false,
         autoUpdateFav: true,
-        autoApplyPreset: true,
-
-        // 新增：读取最后一次激活的方案名 (由 content.js 写入)
-        lastActivePreset: "",
 
         introTime: 90,
         outroTime: 0,
@@ -42,39 +31,25 @@ document.addEventListener('DOMContentLoaded', () => {
         autoPlayNext: false,
         keyForward: defaultKeys.forward,
         keyRewind: defaultKeys.rewind,
-        savedPresets: defaultPresets,
         favorites: {},
         favFolders: defaultFolders,
         customTagRules: [],
-        blacklistedSites: [],    // 【新增】黑名单
-        manualEnableSites: [],   // 【新增】手动开启记录
-        whitelistMode: true      // 【新增】白名单模式（默认开启）
+        blacklistedSites: [],
+        manualEnableSites: [],
+        whitelistMode: true
     }, (items) => {
-        // 优先初始化标签设置
         try { setupTagSettings(items.customTagRules); } catch(e) { console.error("TagSettings Error:", e); }
 
         loadConfigToUI(items);
-        currentPresets = items.savedPresets;
         currentFavorites = items.favorites;
         currentFolders = items.favFolders;
         currentBlacklist = items.blacklistedSites || [];
 
         document.getElementById('autoUpdateFav').checked = items.autoUpdateFav;
-        document.getElementById('autoApplyPreset').checked = items.autoApplyPreset;
         document.getElementById('whitelistMode').checked = items.whitelistMode || false;
-
-        // 显示当前匹配的方案名
-        const activeNameLabel = document.getElementById('activePresetName');
-        if (items.lastActivePreset && items.autoApplyPreset) {
-            activeNameLabel.textContent = `已激活: ${items.lastActivePreset}`;
-            activeNameLabel.style.display = 'inline-block';
-        } else {
-            activeNameLabel.style.display = 'none';
-        }
 
         renderFolderSelect();
 
-        // 【新增】自动检测当前视频是否已收藏，并选中对应的文件夹
         chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
             if (tabs.length === 0) return;
             chrome.tabs.sendMessage(tabs[0].id, { action: "getNiceTitle" }, { frameId: 0 }, (titleResponse) => {
@@ -83,14 +58,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     const favItem = currentFavorites[seriesName];
                     if (favItem && favItem.folder) {
                         const select = document.getElementById('folderSelect');
-                        // 确保该文件夹在下拉列表中
                         if (currentFolders.includes(favItem.folder)) {
                             select.value = favItem.folder;
-                            // 重新渲染列表以显示该文件夹内容
                             renderFavoritesList();
                         }
 
-                        // 【新增】加载该收藏的专属跳过设置到 UI
                         if (favItem.introTime !== undefined) {
                             document.getElementById('introTime').value = favItem.introTime;
                             document.getElementById('enableIntro').checked = (favItem.introTime > 0);
@@ -104,7 +76,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     }
 
-                    // 【新增】显示当前站点信息，用于黑名单功能
                     const currentSite = titleResponse.site || 'Web';
                     const currentUrl = titleResponse.url || '';
                     const blacklistRow = document.getElementById('blacklistRow');
@@ -115,7 +86,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         blacklistRow.style.display = 'flex';
                         currentSiteLabel.textContent = `当前站点: ${currentSite}`;
 
-                        // 检查是否已在黑名单中
                         const isBlacklisted = currentBlacklist.some(site =>
                             currentUrl.includes(site) || currentSite.includes(site)
                         );
@@ -134,7 +104,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         document.getElementById('folderSelect').addEventListener('change', () => {
-            visibleCount = PAGE_SIZE; // 切换文件夹时重置
+            visibleCount = PAGE_SIZE;
             renderFavoritesList();
         });
 
@@ -171,7 +141,6 @@ document.addEventListener('DOMContentLoaded', () => {
              }
         });
 
-        // 【新增】屏蔽当前站点按钮事件
         document.getElementById('btnBlacklistSite')?.addEventListener('click', () => {
             chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
                 if (tabs.length === 0) return;
@@ -182,7 +151,6 @@ document.addEventListener('DOMContentLoaded', () => {
                             currentBlacklist.push(siteKeyword);
                             chrome.storage.local.set({ blacklistedSites: currentBlacklist }, () => {
                                 showFloatingToast(`✅ 已屏蔽站点: ${siteKeyword}\n刷新页面生效`);
-                                // 更新按钮状态
                                 const btn = document.getElementById('btnBlacklistSite');
                                 btn.textContent = '✓ 已屏蔽';
                                 btn.disabled = true;
@@ -195,7 +163,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
 
-        renderPresetDropdown();
         renderFavoritesList();
         tempKeyForward = items.keyForward;
         tempKeyRewind = items.keyRewind;
@@ -266,7 +233,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const filteredFavorites = {};
         let count = 0;
-        
+
         Object.values(currentFavorites).forEach(item => {
             const itemFolder = item.folder || "默认收藏";
             if (selectedFolders.includes(itemFolder)) {
@@ -281,7 +248,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const exportData = {
-            version: "3.1",
+            version: "4.2",
             timestamp: Date.now(),
             dateStr: new Date().toLocaleString(),
             folders: selectedFolders,
@@ -292,8 +259,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const dateStr = date.getFullYear() +
                         (date.getMonth()+1).toString().padStart(2, '0') +
                         date.getDate().toString().padStart(2, '0');
-        
-        // 修复：文件名安全处理，防止非法字符导致下载失败
+
         const safeFolderName = selectedFolders.length === 1 ? selectedFolders[0].replace(/[\\/:*?"<>|]/g, "_") : '';
         const nameSuffix = selectedFolders.length === 1 ? `-${safeFolderName}` : '';
         const filename = `skipper-backup${nameSuffix}-${dateStr}.json`;
@@ -305,7 +271,7 @@ document.addEventListener('DOMContentLoaded', () => {
         a.download = filename;
         document.body.appendChild(a);
         a.click();
-        
+
         setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
 
         exportModal.style.display = 'none';
@@ -322,15 +288,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('btnConfirmMove').addEventListener('click', () => {
         if (!targetMoveSeries || !currentFavorites[targetMoveSeries]) return;
-        
+
         const newFolder = moveSelect.value;
         currentFavorites[targetMoveSeries].folder = newFolder;
-        
+
         saveDataAndRender();
-        
+
         moveModal.style.display = 'none';
         targetMoveSeries = null;
-        
+
         showFloatingToast(`✅ 已移动到 [${newFolder}]`);
     });
 
@@ -349,7 +315,7 @@ function handleImport(data) {
     }
 
     const confirmMsg = `准备导入备份：\n📅 时间: ${data.dateStr || '未知时间'}\n📁 包含 ${Object.keys(data.favorites).length} 个番剧\n\n注意：同名番剧将被覆盖，新番剧将添加。是否继续？`;
-    
+
     if (!confirm(confirmMsg)) return;
 
     const newFoldersSet = new Set([...currentFolders, ...data.folders]);
@@ -365,17 +331,14 @@ function handleImport(data) {
 
     saveFolders();
     saveDataAndRender();
-    
+
     const currentSelect = document.getElementById('folderSelect').value;
     renderFolderSelect(currentSelect);
 
     showFloatingToast(`✅ 成功导入 ${Object.keys(data.favorites).length} 条记录`);
 }
 
-// ... (其他逻辑保持不变，确保完整性) ...
-
 document.getElementById('autoUpdateFav').addEventListener('change', (e) => { chrome.storage.local.set({ autoUpdateFav: e.target.checked }); });
-document.getElementById('autoApplyPreset').addEventListener('change', (e) => { chrome.storage.local.set({ autoApplyPreset: e.target.checked }); });
 document.getElementById('whitelistMode').addEventListener('change', (e) => {
     const isOn = e.target.checked;
     chrome.storage.local.set({ whitelistMode: isOn });
@@ -398,22 +361,20 @@ document.getElementById('addFavBtn').addEventListener('click', () => {
                     if (titleResponse.url) finalData.url = titleResponse.url;
                     if (titleResponse.site) finalData.site = titleResponse.site;
                 }
-                
+
                 const currentFolder = document.getElementById('folderSelect').value;
                 let targetFolder = currentFolder;
-                
+
                 if (targetFolder === "__ALL__") {
                     targetFolder = "默认收藏";
                 }
-                
+
                 finalData.folder = targetFolder;
 
-                // 【新增】保存当前跳过设置到该收藏
                 finalData.introTime = parseInt(document.getElementById('introTime').value) || 0;
                 finalData.outroTime = parseInt(document.getElementById('outroTime').value) || 0;
                 finalData.minDuration = parseInt(document.getElementById('minDuration').value) || 0;
 
-                // 合并旧数据中的自定义设置
                 if (currentFavorites[finalData.series]) {
                     const old = currentFavorites[finalData.series];
                     if (old.introTime !== undefined) finalData.introTime = old.introTime;
@@ -456,7 +417,7 @@ function renderFolderSelect(selectValue) {
     const select = document.getElementById('folderSelect');
     const oldVal = selectValue || select.value || "__ALL__";
     select.innerHTML = '';
-    
+
     const allOpt = document.createElement('option');
     allOpt.value = "__ALL__";
     allOpt.innerText = "≡ 全部展示";
@@ -468,7 +429,7 @@ function renderFolderSelect(selectValue) {
         opt.innerText = f;
         select.appendChild(opt);
     });
-    
+
     select.value = oldVal;
     if (select.value !== oldVal) {
         select.value = "__ALL__";
@@ -483,10 +444,9 @@ function renderFavoritesList() {
         listDiv.innerHTML = '<div style="padding:15px; text-align:center; color:#999; font-size:12px;">暂无收藏</div>';
         return;
     }
-    
-    // 使用 DocumentFragment 优化渲染
+
     const fragment = document.createDocumentFragment();
-    
+
     let sortedItems = Object.values(currentFavorites);
 
     if (currentFolder !== "__ALL__") {
@@ -504,7 +464,6 @@ function renderFavoritesList() {
         return;
     }
 
-    // 分页切片
     const totalItems = sortedItems.length;
     const itemsToShow = sortedItems.slice(0, visibleCount);
 
@@ -517,7 +476,7 @@ function renderFavoritesList() {
     itemsToShow.forEach(item => {
         const div = document.createElement('div');
         div.className = 'fav-item';
-        
+
         let folderBadge = '';
         if (currentFolder === "__ALL__") {
             folderBadge = `<span style="background:#f0f0f0; color:#888; padding:1px 4px; border-radius:3px; margin-right:4px; font-size:10px; border:1px solid #eee;">${item.folder || '默认'}</span>`;
@@ -537,14 +496,14 @@ function renderFavoritesList() {
                 <button class="btn-del" title="删除" style="border:1px solid #ffcccc; background:#fff; color:red; cursor:pointer; font-size:10px;">×</button>
             </div>
         `;
-        
-        div.onmouseenter = () => { 
+
+        div.onmouseenter = () => {
             const actions = div.querySelector('.fav-actions');
-            if(actions) actions.style.display = 'block'; 
+            if(actions) actions.style.display = 'block';
         };
-        div.onmouseleave = () => { 
+        div.onmouseleave = () => {
             const actions = div.querySelector('.fav-actions');
-            if(actions) actions.style.display = 'none'; 
+            if(actions) actions.style.display = 'none';
         };
 
         div.addEventListener('click', (e) => {
@@ -562,23 +521,23 @@ function renderFavoritesList() {
 
         div.querySelector('.btn-move').addEventListener('click', (e) => {
             e.stopPropagation();
-            
+
             targetMoveSeries = item.series;
             const moveSelect = document.getElementById('moveTargetSelect');
             moveSelect.innerHTML = '';
-            
+
             currentFolders.forEach(folder => {
                 const opt = document.createElement('option');
                 opt.value = folder;
                 opt.innerText = folder;
-                
+
                 if (folder === (item.folder || "默认收藏")) {
                     opt.innerText += " (当前)";
-                    opt.selected = true; 
+                    opt.selected = true;
                 }
                 moveSelect.appendChild(opt);
             });
-            
+
             const newOpt = document.createElement('option');
             newOpt.value = "__NEW__";
             newOpt.innerText = "➕ 新建文件夹...";
@@ -591,8 +550,8 @@ function renderFavoritesList() {
                     if (newName && !currentFolders.includes(newName)) {
                         currentFolders.push(newName);
                         saveFolders();
-                        renderFolderSelect(); 
-                        
+                        renderFolderSelect();
+
                         const tempOpt = document.createElement('option');
                         tempOpt.value = newName;
                         tempOpt.innerText = newName;
@@ -612,15 +571,13 @@ function renderFavoritesList() {
         fragment.appendChild(div);
     });
 
-    // 加载更多按钮
     if (visibleCount < totalItems) {
         const loadMoreDiv = document.createElement('div');
         loadMoreDiv.style.textAlign = 'center';
         loadMoreDiv.style.padding = '10px';
         loadMoreDiv.innerHTML = `<button id="btnLoadMore" style="padding:5px 15px; cursor:pointer; background:#f0f0f0; border:1px solid #ddd; border-radius:4px;">加载更多 (${totalItems - visibleCount})</button>`;
         fragment.appendChild(loadMoreDiv);
-        
-        // 使用 setTimeout 确保插入 DOM 后绑定事件
+
         setTimeout(() => {
             document.getElementById('btnLoadMore')?.addEventListener('click', () => {
                 visibleCount += PAGE_SIZE;
@@ -628,84 +585,11 @@ function renderFavoritesList() {
             });
         }, 0);
     }
-    
+
     listDiv.innerHTML = '';
     listDiv.appendChild(fragment);
 }
 
-function renderPresetDropdown() {
-    const select = document.getElementById('presetSelect');
-    const selectedValue = select.value;
-    select.innerHTML = '<option value="">-- 预设方案 --</option>';
-    currentPresets.forEach((preset, index) => {
-        const option = document.createElement('option');
-        option.value = index;
-        const domainText = preset.domain ? ` [🔗${preset.domain}]` : '';
-        option.textContent = `${preset.name}${domainText}`;
-        select.appendChild(option);
-    });
-    if(selectedValue && currentPresets[selectedValue]) select.value = selectedValue;
-}
-document.getElementById('presetSelect').addEventListener('change', (e) => {
-    const index = e.target.value;
-    const domainInput = document.getElementById('domainMatch');
-    if (index !== "") domainInput.value = currentPresets[index].domain || "";
-    else domainInput.value = "";
-});
-document.getElementById('applyPresetBtn').addEventListener('click', () => {
-    const index = document.getElementById('presetSelect').value;
-    if (index === "") return showTempMessage("请先选择预设", "red");
-    const p = currentPresets[index];
-    loadPresetToUI(p);
-    chrome.storage.local.set({ savedPresets: currentPresets });
-    showTempMessage(`已加载: ${p.name}`);
-});
-document.getElementById('addPresetBtn').addEventListener('click', () => {
-    const index = document.getElementById('presetSelect').value;
-    const domain = document.getElementById('domainMatch').value.trim();
-    if (index === "") {
-        const name = prompt("新预设名称:");
-        if (!name) return;
-        currentPresets.push(createPresetFromUI(name, domain));
-    } else {
-        const p = currentPresets[index];
-        if (confirm(`更新 "${p.name}"?`)) currentPresets[index] = createPresetFromUI(p.name, domain);
-        else return;
-    }
-    savePresetsToStorage();
-    renderPresetDropdown();
-    showTempMessage("已保存 ✅");
-});
-document.getElementById('delPresetBtn').addEventListener('click', () => {
-    const index = document.getElementById('presetSelect').value;
-    if (index === "") return;
-    if (confirm("确定删除?")) {
-        currentPresets.splice(index, 1);
-        savePresetsToStorage();
-        renderPresetDropdown();
-        document.getElementById('domainMatch').value = "";
-    }
-});
-
-function createPresetFromUI(name, domain) {
-    return {
-        name: name, domain: domain,
-        intro: parseInt(document.getElementById('introTime').value) || 0,
-        outro: parseInt(document.getElementById('outroTime').value) || 0,
-        restart: document.getElementById('autoRestart').checked,
-        next: document.getElementById('autoPlayNext').checked,
-    };
-}
-function loadPresetToUI(p) {
-    document.getElementById('introTime').value = p.intro;
-    document.getElementById('outroTime').value = p.outro;
-    document.getElementById('autoRestart').checked = p.restart;
-    document.getElementById('autoPlayNext').checked = p.next;
-    document.getElementById('enableIntro').checked = (p.intro > 0);
-    document.getElementById('enableOutro').checked = (p.outro > 0);
-    document.getElementById('domainMatch').value = p.domain || "";
-}
-function savePresetsToStorage() { chrome.storage.local.set({ savedPresets: currentPresets }); }
 function loadConfigToUI(items) {
     document.getElementById('autoSkipEnable').checked = items.autoSkipEnable;
     document.getElementById('enableIntro').checked = items.enableIntro;
@@ -719,6 +603,7 @@ function loadConfigToUI(items) {
     document.getElementById('keyForward').value = items.keyForward.keyName;
     document.getElementById('keyRewind').value = items.keyRewind.keyName;
 }
+
 function setupKeyRecorder(elementId, saveCallback) {
     const input = document.getElementById(elementId);
     input.addEventListener('keydown', (e) => {
@@ -737,13 +622,11 @@ function setupKeyRecorder(elementId, saveCallback) {
     });
 }
 
-// 【新增】自动保存：数字输入框和开关变更即时保存
 function autoSaveSettings(changedKey, changedValue) {
     const data = {};
     if (changedKey) {
         data[changedKey] = changedValue;
     } else {
-        // 全量保存（用于初始化容错）
         data.introTime = parseInt(document.getElementById('introTime').value) || 0;
         data.outroTime = parseInt(document.getElementById('outroTime').value) || 0;
         data.manualSkipTime = parseInt(document.getElementById('manualSkipTime').value) || 90;
@@ -752,7 +635,6 @@ function autoSaveSettings(changedKey, changedValue) {
         data.keyRewind = tempKeyRewind || defaultKeys.rewind;
     }
 
-    // 同步更新当前已收藏视频的专属设置
     if (currentFavorites) {
         chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
             if (tabs.length > 0) {
@@ -774,14 +656,12 @@ function autoSaveSettings(changedKey, changedValue) {
     }
 }
 
-// 数字输入即时保存
 ['introTime', 'outroTime', 'manualSkipTime', 'minDuration'].forEach(id => {
     document.getElementById(id).addEventListener('input', () => {
         autoSaveSettings(id, parseInt(document.getElementById(id).value) || 0);
     });
 });
 
-// 快捷键完成录制后自动保存
 setupKeyRecorder('keyForward', (keyData) => {
     tempKeyForward = keyData;
     autoSaveSettings('keyForward', keyData);
@@ -791,13 +671,11 @@ setupKeyRecorder('keyRewind', (keyData) => {
     autoSaveSettings('keyRewind', keyData);
 });
 
-// 所有设置已改为自动保存，无需手动点击
 const switches = ['autoSkipEnable', 'enableIntro', 'enableOutro', 'autoRestart', 'autoPlayNext'];
 switches.forEach(id => {
     document.getElementById(id).addEventListener('change', (e) => {
         let data = {}; data[id] = e.target.checked;
 
-        // 【新增】当用户手动切换主开关时，记录/移除当前站点
         if (id === 'autoSkipEnable') {
             updateStatusText(e.target.checked);
 
@@ -810,12 +688,10 @@ switches.forEach(id => {
                             let manualList = items.manualEnableSites || [];
 
                             if (e.target.checked) {
-                                // 用户手动开启：添加到手动开启列表
                                 if (!manualList.includes(currentSite)) {
                                     manualList.push(currentSite);
                                 }
                             } else {
-                                // 用户手动关闭：从手动开启列表移除
                                 manualList = manualList.filter(s => s !== currentSite);
                             }
 
@@ -831,6 +707,7 @@ switches.forEach(id => {
         }
     });
 });
+
 function updateStatusText(isEnabled) {
     const statusDiv = document.getElementById('status');
     if (!statusDiv.dataset.tempMessage) {
@@ -838,6 +715,7 @@ function updateStatusText(isEnabled) {
         statusDiv.style.color = isEnabled ? 'green' : '#666';
     }
 }
+
 function showTempMessage(msg, color = '#00aeec') {
     const statusDiv = document.getElementById('status');
     statusDiv.dataset.tempMessage = 'true';
@@ -850,11 +728,10 @@ function showTempMessage(msg, color = '#00aeec') {
     }, 1500);
 }
 
-// 【新增】处理标签设置 UI
 function setupTagSettings(savedRules) {
     let rules = savedRules || [];
     const modal = document.getElementById('tagSettingsModal');
-    if (!modal) return; // 元素不存在则退出，防止报错
+    if (!modal) return;
 
     const listDiv = document.getElementById('tagRuleList');
     const matchInput = document.getElementById('tagMatchInput');
@@ -865,23 +742,20 @@ function setupTagSettings(savedRules) {
 
     if (!btnOpen || !btnClose || !btnAdd) return;
 
-    // 打开模态框
     btnOpen.addEventListener('click', () => {
         renderRules();
         modal.style.display = 'flex';
     });
 
-    // 关闭模态框
     btnClose.addEventListener('click', () => {
         modal.style.display = 'none';
     });
 
-    // 添加规则
     btnAdd.addEventListener('click', () => {
         const match = matchInput.value.trim();
         const name = nameInput.value.trim();
         if (!match || !name) return alert("请填写完整关键词和标签名");
-        
+
         rules.push({ match: match, name: name });
         saveRules();
         renderRules();
@@ -889,7 +763,6 @@ function setupTagSettings(savedRules) {
         nameInput.value = '';
     });
 
-    // 渲染列表
     function renderRules() {
         listDiv.innerHTML = '';
         if (rules.length === 0) {
@@ -910,7 +783,6 @@ function setupTagSettings(savedRules) {
             listDiv.appendChild(div);
         });
 
-        // 绑定删除事件
     document.querySelectorAll('.btn-del-rule').forEach(btn => {
         btn.addEventListener('click', (e) => {
             const idx = e.target.dataset.idx;
@@ -921,13 +793,11 @@ function setupTagSettings(savedRules) {
     });
 }
 
-// 保存到 Storage
 function saveRules() {
     chrome.storage.local.set({ customTagRules: rules });
 }
 }
 
-// --- 国际化 ---
 function localizeHtml() {
     const elements = document.querySelectorAll('[data-i18n]');
     elements.forEach(el => {
