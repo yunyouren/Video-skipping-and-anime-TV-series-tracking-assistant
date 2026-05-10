@@ -679,10 +679,7 @@ function handleTimeUpdate(e) {
     const video = e.target;
     autoUpdateFavorites(video);
 
-    if (config.autoSkipEnable !== true) return;
-    if (video.duration < config.minDuration) return;
-
-    // 【新增】白名单模式：仅对已收藏的番剧执行跳过，并应用每个收藏的专属设置
+    // 白名单模式：仅对已收藏的番剧执行跳过，并应用每个收藏的专属设置
     let currentIntro = config.introTime;
     let currentOutro = config.outroTime;
     let currentMinDuration = config.minDuration;
@@ -692,9 +689,9 @@ function handleTimeUpdate(e) {
     if (config.whitelistMode === true) {
         const info = getCachedVideoInfo();
         const fav = config.favorites && config.favorites[info.seriesName];
-        if (!fav) return; // 未收藏的视频不执行跳过
+        if (!fav) return;
+        if (fav.autoSkipEnabled === false) return; // 该收藏单独关闭了跳过
 
-        // 使用该收藏专属的设置（如果已保存）
         if (fav.introTime !== undefined) {
             currentIntro = fav.introTime;
             currentEnableIntro = (fav.introTime > 0);
@@ -704,6 +701,8 @@ function handleTimeUpdate(e) {
             currentEnableOutro = (fav.outroTime > 0);
         }
         if (fav.minDuration !== undefined) currentMinDuration = fav.minDuration;
+    } else {
+        if (config.autoSkipEnable !== true) return;
     }
 
     if (video.duration < currentMinDuration) return;

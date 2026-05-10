@@ -63,6 +63,11 @@ document.addEventListener('DOMContentLoaded', () => {
                             renderFavoritesList();
                         }
 
+                        if (favItem.autoSkipEnabled !== undefined) {
+                            document.getElementById('autoSkipEnable').checked = favItem.autoSkipEnabled;
+                            updateStatusText(favItem.autoSkipEnabled);
+                        }
+
                         if (favItem.introTime !== undefined) {
                             document.getElementById('introTime').value = favItem.introTime;
                             document.getElementById('enableIntro').checked = (favItem.introTime > 0);
@@ -371,12 +376,15 @@ document.getElementById('addFavBtn').addEventListener('click', () => {
 
                 finalData.folder = targetFolder;
 
+                finalData.autoSkipEnabled = document.getElementById('autoSkipEnable').checked;
+
                 finalData.introTime = parseInt(document.getElementById('introTime').value) || 0;
                 finalData.outroTime = parseInt(document.getElementById('outroTime').value) || 0;
                 finalData.minDuration = parseInt(document.getElementById('minDuration').value) || 0;
 
                 if (currentFavorites[finalData.series]) {
                     const old = currentFavorites[finalData.series];
+                    if (old.autoSkipEnabled !== undefined) finalData.autoSkipEnabled = old.autoSkipEnabled;
                     if (old.introTime !== undefined) finalData.introTime = old.introTime;
                     if (old.outroTime !== undefined) finalData.outroTime = old.outroTime;
                     if (old.minDuration !== undefined) finalData.minDuration = old.minDuration;
@@ -682,6 +690,12 @@ switches.forEach(id => {
             chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
                 if (tabs.length === 0) return;
                 chrome.tabs.sendMessage(tabs[0].id, { action: "getNiceTitle" }, { frameId: 0 }, (res) => {
+                    // 保存到当前匹配的收藏
+                    if (res && res.series && currentFavorites[res.series]) {
+                        currentFavorites[res.series].autoSkipEnabled = e.target.checked;
+                        data.favorites = currentFavorites;
+                    }
+
                     if (res && res.site && res.site !== 'Web') {
                         const currentSite = res.site;
                         chrome.storage.local.get({ manualEnableSites: [] }, (items) => {
