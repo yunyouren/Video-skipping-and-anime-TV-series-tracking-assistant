@@ -47,7 +47,8 @@ document.addEventListener('DOMContentLoaded', () => {
         favFolders: defaultFolders,
         customTagRules: [],
         blacklistedSites: [],    // 【新增】黑名单
-        manualEnableSites: []    // 【新增】手动开启记录
+        manualEnableSites: [],   // 【新增】手动开启记录
+        whitelistMode: false     // 【新增】白名单模式
     }, (items) => {
         // 优先初始化标签设置
         try { setupTagSettings(items.customTagRules); } catch(e) { console.error("TagSettings Error:", e); }
@@ -60,6 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         document.getElementById('autoUpdateFav').checked = items.autoUpdateFav;
         document.getElementById('autoApplyPreset').checked = items.autoApplyPreset;
+        document.getElementById('whitelistMode').checked = items.whitelistMode || false;
 
         // 显示当前匹配的方案名
         const activeNameLabel = document.getElementById('activePresetName');
@@ -363,6 +365,11 @@ function handleImport(data) {
 
 document.getElementById('autoUpdateFav').addEventListener('change', (e) => { chrome.storage.local.set({ autoUpdateFav: e.target.checked }); });
 document.getElementById('autoApplyPreset').addEventListener('change', (e) => { chrome.storage.local.set({ autoApplyPreset: e.target.checked }); });
+document.getElementById('whitelistMode').addEventListener('change', (e) => {
+    const isOn = e.target.checked;
+    chrome.storage.local.set({ whitelistMode: isOn });
+    showFloatingToast(isOn ? '🎯 白名单模式已开启，仅对已收藏生效' : '🌐 已切换为全局模式');
+});
 
 document.getElementById('addFavBtn').addEventListener('click', () => {
     chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
@@ -721,6 +728,7 @@ document.getElementById('saveBtn').addEventListener('click', () => {
         autoUpdateFav: document.getElementById('autoUpdateFav').checked,
         
         autoApplyPreset: document.getElementById('autoApplyPreset').checked, // 保存开关
+        whitelistMode: document.getElementById('whitelistMode').checked,    // 【新增】白名单模式
 
         savedPresets: currentPresets,
         favorites: currentFavorites,

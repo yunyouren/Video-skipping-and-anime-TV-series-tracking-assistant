@@ -639,14 +639,16 @@ function formatTime(seconds) {
 
 // --- 高级设置逻辑 ---
 function loadSettings() {
-    chrome.storage.local.get({ onlySaveMaxEpisode: false }, (items) => {
+    chrome.storage.local.get({ onlySaveMaxEpisode: false, whitelistMode: false }, (items) => {
         document.getElementById('chkOnlySaveMaxEpisode').checked = items.onlySaveMaxEpisode;
+        document.getElementById('chkWhitelistMode').checked = items.whitelistMode || false;
     });
 }
 
 function saveSettings() {
     const onlySaveMaxEpisode = document.getElementById('chkOnlySaveMaxEpisode').checked;
-    chrome.storage.local.set({ onlySaveMaxEpisode }, () => {
+    const whitelistMode = document.getElementById('chkWhitelistMode').checked;
+    chrome.storage.local.set({ onlySaveMaxEpisode, whitelistMode }, () => {
         showToast('设置已保存');
     });
 }

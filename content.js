@@ -40,7 +40,8 @@ let config = {
     customSeriesRules: [],
     onlySaveMaxEpisode: false,
     blacklistedSites: [],    // 【新增】黑名单网站列表
-    manualEnableSites: []    // 【新增】记录用户手动开启的站点
+    manualEnableSites: [],   // 【新增】记录用户手动开启的站点
+    whitelistMode: false     // 【新增】白名单模式：仅对已收藏番剧生效
 };
 
 let isSwitchingEpisode = false;
@@ -729,7 +730,14 @@ function handleTimeUpdate(e) {
     autoUpdateFavorites(video);
 
     if (config.autoSkipEnable !== true) return;
-    if (video.duration < config.minDuration) return; 
+    if (video.duration < config.minDuration) return;
+
+    // 【新增】白名单模式：仅对已收藏的番剧执行跳过
+    if (config.whitelistMode === true) {
+        const info = getCachedVideoInfo();
+        const hasFav = config.favorites && config.favorites[info.seriesName];
+        if (!hasFav) return; // 未收藏的视频不执行跳过
+    }
 
     if (config.autoRestart === true && !hasTriggeredRestart) {
         if (Date.now() - videoLoadStartTime < 4000) {
