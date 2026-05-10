@@ -41,7 +41,7 @@ let config = {
     onlySaveMaxEpisode: false,
     blacklistedSites: [],    // 【新增】黑名单网站列表
     manualEnableSites: [],   // 【新增】记录用户手动开启的站点
-    whitelistMode: false     // 【新增】白名单模式：仅对已收藏番剧生效
+    whitelistMode: true      // 【新增】白名单模式：仅对已收藏番剧生效（默认开启）
 };
 
 let isSwitchingEpisode = false;

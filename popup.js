@@ -48,7 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
         customTagRules: [],
         blacklistedSites: [],    // 【新增】黑名单
         manualEnableSites: [],   // 【新增】手动开启记录
-        whitelistMode: false     // 【新增】白名单模式
+        whitelistMode: true      // 【新增】白名单模式（默认开启）
     }, (items) => {
         // 优先初始化标签设置
         try { setupTagSettings(items.customTagRules); } catch(e) { console.error("TagSettings Error:", e); }

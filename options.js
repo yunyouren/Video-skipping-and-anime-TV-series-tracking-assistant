@@ -639,7 +639,7 @@ function formatTime(seconds) {
 
 // --- 高级设置逻辑 ---
 function loadSettings() {
-    chrome.storage.local.get({ onlySaveMaxEpisode: false, whitelistMode: false }, (items) => {
+    chrome.storage.local.get({ onlySaveMaxEpisode: false, whitelistMode: true }, (items) => {
         document.getElementById('chkOnlySaveMaxEpisode').checked = items.onlySaveMaxEpisode;
         document.getElementById('chkWhitelistMode').checked = items.whitelistMode || false;
     });
