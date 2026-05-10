@@ -201,8 +201,6 @@ document.addEventListener('DOMContentLoaded', () => {
         tempKeyRewind = items.keyRewind;
         updateStatusText(items.autoSkipEnable);
     });
-    setupKeyRecorder('keyForward', (keyData) => { tempKeyForward = keyData; });
-    setupKeyRecorder('keyRewind', (keyData) => { tempKeyRewind = keyData; });
 
     document.getElementById('btnImport').addEventListener('click', () => {
         document.getElementById('importInput').click();
@@ -738,6 +736,62 @@ function setupKeyRecorder(elementId, saveCallback) {
         saveCallback({ code: e.code, shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey, keyName: input.value });
     });
 }
+
+// 【新增】自动保存：数字输入框和开关变更即时保存
+function autoSaveSettings(changedKey, changedValue) {
+    const data = {};
+    if (changedKey) {
+        data[changedKey] = changedValue;
+    } else {
+        // 全量保存（用于初始化容错）
+        data.introTime = parseInt(document.getElementById('introTime').value) || 0;
+        data.outroTime = parseInt(document.getElementById('outroTime').value) || 0;
+        data.manualSkipTime = parseInt(document.getElementById('manualSkipTime').value) || 90;
+        data.minDuration = parseInt(document.getElementById('minDuration').value) || 0;
+        data.keyForward = tempKeyForward || defaultKeys.forward;
+        data.keyRewind = tempKeyRewind || defaultKeys.rewind;
+    }
+
+    // 同步更新当前已收藏视频的专属设置
+    if (currentFavorites) {
+        chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+            if (tabs.length > 0) {
+                chrome.tabs.sendMessage(tabs[0].id, { action: "getNiceTitle" }, { frameId: 0 }, (res) => {
+                    if (res && res.series && currentFavorites[res.series]) {
+                        if (data.introTime !== undefined) currentFavorites[res.series].introTime = data.introTime;
+                        if (data.outroTime !== undefined) currentFavorites[res.series].outroTime = data.outroTime;
+                        if (data.minDuration !== undefined) currentFavorites[res.series].minDuration = data.minDuration;
+                        data.favorites = currentFavorites;
+                    }
+                    chrome.storage.local.set(data);
+                });
+            } else {
+                chrome.storage.local.set(data);
+            }
+        });
+    } else {
+        chrome.storage.local.set(data);
+    }
+}
+
+// 数字输入即时保存
+['introTime', 'outroTime', 'manualSkipTime', 'minDuration'].forEach(id => {
+    document.getElementById(id).addEventListener('input', () => {
+        autoSaveSettings(id, parseInt(document.getElementById(id).value) || 0);
+    });
+});
+
+// 快捷键完成录制后自动保存
+setupKeyRecorder('keyForward', (keyData) => {
+    tempKeyForward = keyData;
+    autoSaveSettings('keyForward', keyData);
+});
+setupKeyRecorder('keyRewind', (keyData) => {
+    tempKeyRewind = keyData;
+    autoSaveSettings('keyRewind', keyData);
+});
+
+// saveBtn 仅用于保存预设方案和收藏数据
 document.getElementById('saveBtn').addEventListener('click', () => {
     const config = {
         autoSkipEnable: document.getElementById('autoSkipEnable').checked,
@@ -752,28 +806,13 @@ document.getElementById('saveBtn').addEventListener('click', () => {
         keyForward: tempKeyForward || defaultKeys.forward,
         keyRewind: tempKeyRewind || defaultKeys.rewind,
         autoUpdateFav: document.getElementById('autoUpdateFav').checked,
-        
-        autoApplyPreset: document.getElementById('autoApplyPreset').checked, // 保存开关
-        whitelistMode: document.getElementById('whitelistMode').checked,    // 【新增】白名单模式
-
+        autoApplyPreset: document.getElementById('autoApplyPreset').checked,
+        whitelistMode: document.getElementById('whitelistMode').checked,
         savedPresets: currentPresets,
         favorites: currentFavorites,
         favFolders: currentFolders
     };
-
-    // 【新增】保存时同步更新当前已收藏视频的专属设置
-    chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
-        if (tabs.length > 0) {
-            chrome.tabs.sendMessage(tabs[0].id, { action: "getNiceTitle" }, { frameId: 0 }, (res) => {
-                if (res && res.series && config.favorites[res.series]) {
-                    config.favorites[res.series].introTime = config.introTime;
-                    config.favorites[res.series].outroTime = config.outroTime;
-                    config.favorites[res.series].minDuration = config.minDuration;
-                }
-                chrome.storage.local.set(config, () => { showTempMessage('✅ 配置已保存'); });
-            });
-        }
-    });
+    chrome.storage.local.set(config, () => { showTempMessage('✅ 配置已保存'); });
 });
 const switches = ['autoSkipEnable', 'enableIntro', 'enableOutro', 'autoRestart', 'autoPlayNext'];
 switches.forEach(id => {
