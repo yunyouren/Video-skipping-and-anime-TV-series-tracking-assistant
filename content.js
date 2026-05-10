@@ -37,8 +37,7 @@ let config = {
     customTagRules: [],
     customSeriesRules: [],
     onlySaveMaxEpisode: false,
-    blacklistedSites: [],    // 【新增】黑名单网站列表
-    manualEnableSites: [],   // 【新增】记录用户手动开启的站点
+    manualEnableSites: [],   // 记录用户手动开启的站点
     whitelistMode: true      // 【新增】白名单模式：仅对已收藏番剧生效（默认开启）
 };
 
@@ -118,23 +117,7 @@ function checkAndApplyAutoMatch() {
 
     console.log("🔍 解析调试:", info.seriesName, "|", info.episodeName, "| 站点:", currentSite);
 
-    // 【新增】1. 黑名单检测：如果当前站点在黑名单中，强制禁用并退出
-    if (config.blacklistedSites && config.blacklistedSites.length > 0) {
-        const isBlacklisted = config.blacklistedSites.some(site => {
-            return currentUrl.includes(site) || currentSite.includes(site) || document.title.includes(site);
-        });
-        if (isBlacklisted) {
-            console.log("Skipper: 当前站点在黑名单中，已禁用");
-            if (config.autoSkipEnable) {
-                config.autoSkipEnable = false;
-                chrome.storage.local.set({ autoSkipEnable: false });
-            }
-            showToast(`🚫 当前站点已被屏蔽`);
-            return;
-        }
-    }
-
-    // 2. 检查用户手动开启记录：如果当前站点在手动开启列表中，恢复开启状态
+    // 检查用户手动开启记录：如果当前站点在手动开启列表中，恢复开启状态
     if (config.manualEnableSites && config.manualEnableSites.length > 0) {
         const isManualEnabled = config.manualEnableSites.some(site => {
             return currentUrl.includes(site) || currentSite.includes(site);

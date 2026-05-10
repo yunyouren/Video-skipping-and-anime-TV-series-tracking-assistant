@@ -11,7 +11,6 @@ let tempKeyForward = null;
 let tempKeyRewind = null;
 let currentFavorites = {};
 let currentFolders = [];
-let currentBlacklist = [];
 let targetMoveSeries = null;
 let visibleCount = 20;
 const PAGE_SIZE = 20;
@@ -34,7 +33,6 @@ document.addEventListener('DOMContentLoaded', () => {
         favorites: {},
         favFolders: defaultFolders,
         customTagRules: [],
-        blacklistedSites: [],
         manualEnableSites: [],
         whitelistMode: true
     }, (items) => {
@@ -43,7 +41,6 @@ document.addEventListener('DOMContentLoaded', () => {
         loadConfigToUI(items);
         currentFavorites = items.favorites;
         currentFolders = items.favFolders;
-        currentBlacklist = items.blacklistedSites || [];
 
         document.getElementById('autoUpdateFav').checked = items.autoUpdateFav;
         document.getElementById('whitelistMode').checked = items.whitelistMode || false;
@@ -81,29 +78,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     }
 
-                    const currentSite = titleResponse.site || 'Web';
-                    const currentUrl = titleResponse.url || '';
-                    const blacklistRow = document.getElementById('blacklistRow');
-                    const currentSiteLabel = document.getElementById('currentSiteLabel');
-                    const blacklistBtn = document.getElementById('btnBlacklistSite');
-
-                    if (blacklistRow && currentSiteLabel && currentSite !== 'Web') {
-                        blacklistRow.style.display = 'flex';
-                        currentSiteLabel.textContent = `当前站点: ${currentSite}`;
-
-                        const isBlacklisted = currentBlacklist.some(site =>
-                            currentUrl.includes(site) || currentSite.includes(site)
-                        );
-                        if (isBlacklisted) {
-                            blacklistBtn.textContent = '✓ 已屏蔽';
-                            blacklistBtn.disabled = true;
-                            blacklistBtn.style.background = '#f5f5f5';
-                            blacklistBtn.style.color = '#999';
-                        } else {
-                            blacklistBtn.textContent = '🚫 屏蔽此站';
-                            blacklistBtn.disabled = false;
-                        }
-                    }
                 }
             });
         });
@@ -144,28 +118,6 @@ document.addEventListener('DOMContentLoaded', () => {
                  saveFolders();
                  renderFolderSelect("默认收藏");
              }
-        });
-
-        document.getElementById('btnBlacklistSite')?.addEventListener('click', () => {
-            chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
-                if (tabs.length === 0) return;
-                chrome.tabs.sendMessage(tabs[0].id, { action: "getNiceTitle" }, { frameId: 0 }, (res) => {
-                    if (res && res.site) {
-                        const siteKeyword = res.site;
-                        if (!currentBlacklist.includes(siteKeyword)) {
-                            currentBlacklist.push(siteKeyword);
-                            chrome.storage.local.set({ blacklistedSites: currentBlacklist }, () => {
-                                showFloatingToast(`✅ 已屏蔽站点: ${siteKeyword}\n刷新页面生效`);
-                                const btn = document.getElementById('btnBlacklistSite');
-                                btn.textContent = '✓ 已屏蔽';
-                                btn.disabled = true;
-                                btn.style.background = '#f5f5f5';
-                                btn.style.color = '#999';
-                            });
-                        }
-                    }
-                });
-            });
         });
 
         renderFavoritesList();

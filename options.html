@@ -115,9 +115,6 @@
     <a href="#series" class="nav-item" data-target="series">
       <span class="nav-icon">📺</span> <span data-i18n="optionsNavSeries">番剧名称规则</span>
     </a>
-    <a href="#blacklist" class="nav-item" data-target="blacklist">
-      <span class="nav-icon">🚫</span> <span>网站黑名单</span>
-    </a>
     <a href="#favorites" class="nav-item" data-target="favorites">
       <span class="nav-icon">📂</span> <span data-i18n="optionsNavFavs">收藏管理</span>
     </a>
@@ -168,27 +165,6 @@
         </div>
 
         <div class="rule-list" id="seriesListContainer">
-          <!-- 列表渲染区 -->
-        </div>
-      </div>
-    </div>
-
-    <!-- 【新增】网站黑名单页 -->
-    <div id="page-blacklist" class="page-section">
-      <h2>网站黑名单 (Site Blacklist)</h2>
-      <div class="card">
-        <div class="desc">
-          在这里添加需要屏蔽的网站关键词（域名或站点名称）。<br>
-          屏蔽后的网站将不会自动运行跳过功能，适合直播网站、短视频平台等不需要的场景。<br>
-          <strong>注意：</strong>屏蔽后仍可手动开启开关。
-        </div>
-
-        <div class="input-group">
-          <input type="text" id="blacklistInput" placeholder="输入关键词 (例如: douyin 或 直播)">
-          <button id="btnAddBlacklist" class="btn-primary" style="background-color: #ff4d4f;">+ 添加屏蔽</button>
-        </div>
-
-        <div class="rule-list" id="blacklistContainer">
           <!-- 列表渲染区 -->
         </div>
       </div>
