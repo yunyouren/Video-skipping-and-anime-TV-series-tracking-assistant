@@ -1,0 +1,6 @@
+# Local copies and intermediate packages; keep the current distribution archive.
+/Video-skipping-and-anime-TV-series-tracking-assistant-v*/
+/Video-skipping-and-anime-TV-series-tracking-assistant-v*.zip
+!/Video-skipping-and-anime-TV-series-tracking-assistant-v4.7.zip
+node_modules/
+__pycache__/

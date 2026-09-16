@@ -23,6 +23,7 @@ let config = {
     enableOutro: true,
     autoRestart: false,
     autoUpdateFav: true,
+    showWhitelistNotice: false,
 
     introTime: 90,
     outroTime: 0,
@@ -41,45 +42,42 @@ let config = {
     whitelistMode: true      // 【新增】白名单模式：仅对已收藏番剧生效（默认开启）
 };
 
-let isSwitchingEpisode = false;
-let lastCheckTime = 0;
-
-// --- 消息监听 ---
+// Only a frame containing a video answers video requests.
+let saveStatus = { state: '尚未保存', time: null, error: null };
+let catalogSignature = '';
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === "getNiceTitle") {
-        const info = parseVideoInfo(); 
-        sendResponse({ series: info.seriesName, episode: info.episodeName, url: window.location.href, site: info.siteName });
-        return true;
+    if (request.action === 'diagnostics') {
+        const info = getCachedVideoInfo();
+        sendResponse({ website: new URL(window.location.href).hostname, series: info.seriesName,
+            episode: info.episodeName, collectionId: info.collectionId || null, videoDetected: !!findMainVideo(),
+            autoUpdateFav: config.autoUpdateFav, saveStatus });
+        return false;
     }
-    if (request.action === "getRequestVideoInfo") {
+    if (request.action === 'getNiceTitle') {
+        const info = getCachedVideoInfo();
+        const found = SkipperCore.findFavorite(config.favorites, info.seriesName, null, info);
+        sendResponse({ series: found ? found[0] : info.seriesName, sourceSeries: info.seriesName,
+            episode: info.episodeName, url: window.location.href, site: info.siteName,
+            collectionId: info.collectionId, collectionUrl: info.collectionUrl });
+        return false;
+    }
+    if (request.action === 'getRequestVideoInfo') {
         const video = findMainVideo();
-        if (!video) return; 
-        try {
-            const info = parseVideoInfo();
-            const data = {
-                isIframe: (window.self !== window.top),
-                series: info.seriesName, 
-                episode: info.episodeName,     
-                site: info.siteName,
-                url: getResumeUrl(video),
-                time: Math.floor(video.currentTime),
-                duration: Math.floor(video.duration || 0),
-                timestamp: Date.now()
-            };
-            sendResponse(data);
-        } catch (e) {
-            console.error("Skipper: 解析出错", e);
-        }
+        if (!video || !Number.isFinite(video.duration) || video.duration <= 0) return false;
+        const respond = () => {
+            const info = getCachedVideoInfo();
+            sendResponse({ isIframe: window.self !== window.top, series: info.seriesName,
+                episode: info.episodeName, site: info.siteName, url: getResumeUrl(video),
+                time: Math.floor(video.currentTime), duration: Math.floor(video.duration), timestamp: Date.now() });
+        };
+        if (window.self !== window.top && !isTopInfoReady) { refreshTopInfo(respond); return true; }
+        respond();
+        return false;
     }
-
-    // 【新增】主页面接收来自 Background (其实是 Iframe) 的进度同步
-    if (request.action === "triggerAutoUpdate") {
-        // 调用保存函数，传入 Iframe 里的时间和时长
-        // 第一个参数传 null，因为主页面可能没有 video 标签，不需要它
-        autoUpdateFavorites(null, request.time, request.duration);
+    if (request.action === 'clickNext' && window.self === window.top) {
+        sendResponse({ clicked: tryClickNext() });
     }
-
-    return true; 
+    return false;
 });
 
 // --- 初始化 ---
@@ -88,20 +86,18 @@ chrome.storage.local.get(config, (items) => {
     if (!config.keyForward || !config.keyForward.code) config.keyForward = { code: 'ArrowRight', shift: true, ctrl: false, alt: false };
     if (!config.keyRewind || !config.keyRewind.code) config.keyRewind = { code: 'ArrowLeft', shift: true, ctrl: false, alt: false };
 
-    // 页面加载时执行一次匹配
-    checkAndApplyAutoMatch();
-
     // 首次安装/更新后提示白名单模式
-    if (config.showWhitelistNotice === true) {
-        showWhitelistNotification();
+    if (window.self === window.top && config.showWhitelistNotice === true) {
+        if (config.whitelistMode) showWhitelistNotification();
         chrome.storage.local.set({ showWhitelistNotice: false });
     }
 
     window.addEventListener('keydown', onKeyHandler, true);
-    if (!window.biliMonitorInterval) startMonitoring();
+    startMonitoring();
 });
 
-chrome.storage.onChanged.addListener((changes) => {
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
     for (let key in changes) {
         if (config.hasOwnProperty(key)) {
             config[key] = changes[key].newValue;
@@ -109,46 +105,8 @@ chrome.storage.onChanged.addListener((changes) => {
     }
 });
 
-// --- 【核心修改】自动匹配与开关控制 ---
-function checkAndApplyAutoMatch() {
-    const info = parseVideoInfo();
-    const currentUrl = window.location.href;
-    const currentSite = info.siteName;
-
-    console.log("🔍 解析调试:", info.seriesName, "|", info.episodeName, "| 站点:", currentSite);
-
-    // 检查用户手动开启记录：如果当前站点在手动开启列表中，恢复开启状态
-    if (config.manualEnableSites && config.manualEnableSites.length > 0) {
-        const isManualEnabled = config.manualEnableSites.some(site => {
-            return currentUrl.includes(site) || currentSite.includes(site);
-        });
-        if (isManualEnabled && !config.autoSkipEnable) {
-            config.autoSkipEnable = true;
-            chrome.storage.local.set({ autoSkipEnable: true });
-            showToast(`⚡ 已恢复开启状态`);
-        }
-    }
-}
-
-// --- 辅助函数 ---
 function getResumeUrl(video) {
-    let url = window.location.href;
-    // 如果在 Iframe 中且成功获取了顶层 URL，优先使用顶层 URL
-    if (window.self !== window.top && cachedTopUrl) {
-        url = cachedTopUrl;
-    }
-    const time = Math.floor(video.currentTime);
-    if (url.includes("bilibili.com")) {
-        url = url.replace(/[\?&]t=\d+/, "");
-        const separator = url.includes("?") ? "&" : "?";
-        return `${url}${separator}t=${time}`;
-    }
-    if (url.includes("youtube.com") || url.includes("youtu.be")) {
-        url = url.replace(/[\?&]t=\d+s?/, "");
-        const separator = url.includes("?") ? "&" : "?";
-        return `${url}${separator}t=${time}`;
-    }
-    return url;
+    return SkipperCore.resumeUrl(cachedTopUrl || window.location.href, video.currentTime);
 }
 
 function findMainVideo() {
@@ -178,6 +136,16 @@ function isKeyMatch(event, keyConfig) {
 }
 
 function tryClickNext() {
+    const collection = getBiliCollection();
+    if (collection) {
+        const current = SkipperCore.episodeNumber(collection.episodeName);
+        if (current === null) return false;
+        const candidates = [...collection.root.querySelectorAll('.simple-base-item .title')]
+            .filter(el => SkipperCore.episodeNumber(el.getAttribute('title') || el.textContent) === current + 1);
+        if (candidates.length !== 1) return false;
+        candidates[0].click();
+        return true;
+    }
     const selectors = [
         '.bpx-player-ctrl-next', '.squirtle-video-next', 
         '.bilibili-player-video-btn-next', '[aria-label="下一个"]', 
@@ -185,7 +153,7 @@ function tryClickNext() {
     ];
     for (const sel of selectors) {
         const btn = document.querySelector(sel);
-        if (btn && !btn.disabled) {
+        if (btn && !btn.disabled && btn.getAttribute('aria-disabled') !== 'true' && btn.getClientRects().length > 0) {
             btn.click();
             return true;
         }
@@ -194,6 +162,7 @@ function tryClickNext() {
 }
 
 function onKeyHandler(event) {
+    if (event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
     const isForward = isKeyMatch(event, config.keyForward);
     const isRewind = isKeyMatch(event, config.keyRewind);
     if (!isForward && !isRewind) return;
@@ -201,10 +170,10 @@ function onKeyHandler(event) {
     if (!video) return;
     const skipTime = config.manualSkipTime || 90;
     if (isForward) {
-        video.currentTime += skipTime;
+        video.currentTime = Math.min(Number.isFinite(video.duration) ? video.duration : Infinity, video.currentTime + skipTime);
         showToast(`>>> 快进 ${skipTime} 秒`);
     } else if (isRewind) {
-        video.currentTime -= skipTime;
+        video.currentTime = Math.max(0, video.currentTime - skipTime);
         showToast(`<<< 快退 ${skipTime} 秒`);
     }
     event.preventDefault();
@@ -261,7 +230,7 @@ function parseVideoInfo(overrideTitle = null, overrideUrl = null) {
                     }
                 }
             }
-            return { seriesName: finalSeries, episodeName: customInfo.episodeName, siteName };
+            return { ...customInfo, seriesName: finalSeries, siteName };
         }
     }
     // =========== 【插入点：新增代码结束】 ===========
@@ -355,30 +324,82 @@ function parseVideoInfo(overrideTitle = null, overrideUrl = null) {
     return { seriesName, episodeName, siteName };
 }
 
-// --- 监控与更新 ---
-let hasSkippedIntro = false;
-let hasTriggeredRestart = false; 
-let videoLoadStartTime = 0;      
-let restartCooldownTime = 0;
-let lastFavUpdateTime = 0;
-let cachedTopTitle = null; // 缓存顶层标题 (解决 Iframe 无法获取标题问题)
-let cachedTopUrl = null;
-let isTopInfoReady = false; // 标记顶层信息是否已就绪
-
-// 【新增】视频信息缓存
-let cachedVideoInfo = null;
-let lastParseUrl = "";
-let lastUrl = window.location.href; // 用于检测 SPA URL 变化
-
+// Playback state belongs to a media element, never to the entire page.
+const playbackStates = new WeakMap();
 const processedVideos = new WeakSet();
+let cachedTopTitle = null;
+let cachedTopUrl = null;
+let cachedTopInfo = null;
+let isTopInfoReady = window.self === window.top;
+let topInfoRequestedAt = 0;
+let topInfoPending = false;
+let topInfoCallbacks = [];
 
 // --- 站点策略 ---
+function getBiliCollection() {
+    if (!/(^|\.)bilibili\.com$/.test(new URL(window.location.href).hostname)) return null;
+    const link = document.querySelector('.video-pod__header a[href*="collectiondetail?"]');
+    if (!link) return null;
+    const url = new URL(link.getAttribute('href'), window.location.href);
+    const sid = url.searchParams.get('sid');
+    if (url.hostname !== 'space.bilibili.com' || !/^\d+$/.test(sid || '')) return null;
+    const root = link.closest('.video-pod');
+    const h1 = document.querySelector('h1');
+    if (!root || !h1) return null;
+    const title = h1.getAttribute('title') || h1.textContent || '';
+    const episode = title.match(/第\s*\d+\s*[集话]/)?.[0] || '观看中';
+    return { root, seriesName: (link.textContent || '').trim(), episodeName: episode,
+        collectionId: `bilibili:collection:${sid}`, collectionUrl: `${url.origin}${url.pathname}?sid=${sid}`,
+        url: window.location.href };
+}
+function syncCatalog(info, found) {
+    if (!found || !info.collectionId) return;
+    const collection = getBiliCollection();
+    if (!collection) return;
+    const episodes = [...collection.root.querySelectorAll('.simple-base-item .title')].map(el => {
+        const title = el.getAttribute('title') || el.textContent || '';
+        return { title, number: SkipperCore.episodeNumber(title) };
+    }).filter(e => e.number !== null);
+    const signature = `${found[1].id}:${JSON.stringify(episodes)}`;
+    if (!episodes.length || signature === catalogSignature) return;
+    catalogSignature = signature;
+    SkipperCore.mutate({ type: 'catalog', key: found[0], id: found[1].id, collectionId: info.collectionId, episodes }, (_, error) => { if (error) catalogSignature = ''; });
+}
+function pendingEpisodeSelection() {
+    const url = new URL(window.location.href);
+    const target = url.searchParams.get('skipper_episode');
+    const cid = url.searchParams.get('skipper_collection');
+    if (!target || !cid) return false;
+    if (!pendingEpisodeSelection.started) pendingEpisodeSelection.started = Date.now();
+    if (Date.now() - pendingEpisodeSelection.started > 10000) {
+        url.searchParams.delete('skipper_episode'); url.searchParams.delete('skipper_collection');
+        window.history.replaceState(null, '', url.href);
+        showToast('自动选集未完成，请在网页中选择集数');
+        pendingEpisodeSelection.clicked = false; pendingEpisodeSelection.started = 0;
+        return false;
+    }
+    const collection = getBiliCollection();
+    if (!collection) return true;
+    if (collection.collectionId !== cid) { showToast('选集失败：合集不匹配'); return true; }
+    if (SkipperCore.episodeNumber(collection.episodeName) === Number(target)) {
+        url.searchParams.delete('skipper_episode'); url.searchParams.delete('skipper_collection');
+        window.history.replaceState(null, '', url.href);
+        return false;
+    }
+    const matches = [...collection.root.querySelectorAll('.simple-base-item .title')].filter(el => SkipperCore.episodeNumber(el.getAttribute('title') || el.textContent) === Number(target));
+    if (matches.length === 1) {
+        if (!pendingEpisodeSelection.clicked) { pendingEpisodeSelection.clicked = true; matches[0].click(); }
+    } else showToast('找不到唯一匹配的集数，请在网页中选集');
+    return true;
+}
 const SITE_STRATEGIES = [
     {
         domain: 'bilibili.com',
         name: 'B站',
         // 【新增】自定义解析器：直接读 DOM，不依赖标题正则
         parser: () => {
+            const collection = getBiliCollection();
+            if (collection) { const { root, ...info } = collection; return info; }
             // 1. 锁定"系列名称" (Series):
             // B站视频的总标题通常在 .video-title (新版) 或 H1 中，这个标题在切P时不会变
             const h1 = document.querySelector('.video-title') || document.querySelector('#viewbox_report h1') || document.querySelector('h1');
@@ -395,8 +416,7 @@ const SITE_STRATEGIES = [
             // 尝试从右侧分P列表里抓取当前高亮的标题
             // 适配多种 B站 UI 结构 (.list-box .on 是旧版, .cur-list .on 是新版等)
             const activeEl = document.querySelector('.list-box .on') || 
-                             document.querySelector('.cur-list .on') || 
-                             document.querySelector('.video-episode-card__info-title'); // 合集列表
+                             document.querySelector('.cur-list .on');
             
             if (activeEl) {
                 // 列表里通常显示 "1 课程简介"，直接用这个
@@ -467,280 +487,223 @@ function findVideosInShadow(root = document) {
 }
 
 function getCachedVideoInfo() {
-    const currentUrl = window.location.href;
-    // 如果 URL 变了，或者缓存为空，则重新解析
-    if (currentUrl !== lastParseUrl || !cachedVideoInfo) {
-        cachedVideoInfo = parseVideoInfo();
-        lastParseUrl = currentUrl;
-    }
-    return cachedVideoInfo;
+    if (window.self !== window.top && cachedTopInfo) return cachedTopInfo;
+    // Titles and active episode DOM may change without a URL change.
+    return parseVideoInfo();
+}
+
+function refreshTopInfo(callback) {
+    if (callback) topInfoCallbacks.push(callback);
+    if (topInfoPending) return;
+    topInfoPending = true;
+    topInfoRequestedAt = Date.now();
+    chrome.runtime.sendMessage({ action: 'getPageInfo' }, response => {
+        topInfoPending = false;
+        if (!chrome.runtime.lastError && response?.url) {
+            cachedTopTitle = response.title || null;
+            cachedTopUrl = response.url;
+            cachedTopInfo = response.info ? { seriesName: response.info.sourceSeries || response.info.series,
+                episodeName: response.info.episode, siteName: response.info.site,
+                collectionId: response.info.collectionId, collectionUrl: response.info.collectionUrl, url: response.url } : null;
+            isTopInfoReady = true;
+        }
+        const callbacks = topInfoCallbacks;
+        topInfoCallbacks = [];
+        callbacks.forEach(cb => cb());
+    });
+}
+
+function freshState() {
+    return { identity: '', loadedAt: Date.now(), checkedAt: 0, lastSavedAt: 0, lastSavedTime: null,
+        resumed: false, restoring: false, userSeeking: false, skippedIntro: false,
+        switching: false, finishing: false, handledEnd: false, nextAttempted: false, cooldown: 0 };
 }
 
 function startMonitoring() {
-    // 1. 首次运行：处理页面上已存在的 video (支持 Shadow DOM)
-    const scan = () => findVideosInShadow(document).forEach(attachVideoListener);
+    const observedRoots = new WeakSet();
+    let scheduled = false;
+    const scan = (root = document) => {
+        root.querySelectorAll('video').forEach(attachVideoListener);
+        root.querySelectorAll('*').forEach(node => { if (node.shadowRoot) scan(node.shadowRoot); });
+        const target = root === document ? document.body || document.documentElement : root;
+        if (!observedRoots.has(target)) {
+            observedRoots.add(target);
+            new MutationObserver(() => {
+                if (scheduled) return;
+                scheduled = true;
+                setTimeout(() => { scheduled = false; scan(); }, 1000);
+            }).observe(target, { childList: true, subtree: true });
+        }
+    };
+    if (window.self !== window.top) refreshTopInfo();
     scan();
-
-    // 2. 优化后的观察者：防抖/节流处理，避免遍历 mutations
-    let timeout = null;
-    const observer = new MutationObserver((mutations) => {
-        if (timeout) return; // 如果已有计划任务，则忽略当前触发
-        
-        timeout = setTimeout(() => {
-            scan();
-            timeout = null;
-        }, 1000); // 1秒检查一次
-    });
-
-    observer.observe(document.body || document.documentElement, {
-        childList: true,
-        subtree: true
+    window.addEventListener('pagehide', () => {
+        const video = findMainVideo();
+        if (video) autoUpdateFavorites(video, true);
     });
 }
 
 function attachVideoListener(video) {
-    if (processedVideos.has(video)) return; // 避免重复绑定
+    if (processedVideos.has(video)) return;
     processedVideos.add(video);
-
-    if (!video.dataset.hasSkipperListener) {
-        video.addEventListener('timeupdate', handleTimeUpdate);
-        
-        const resetState = () => { 
-            hasSkippedIntro = false; 
-            isSwitchingEpisode = false; 
-            hasTriggeredRestart = false; 
-            videoLoadStartTime = Date.now(); 
-            restartCooldownTime = 0; 
-            lastFavUpdateTime = 0; 
-            cachedTopTitle = null;
-            cachedTopUrl = null;
-
-            // 清除视频信息缓存，确保新视频加载时重新解析
-            cachedVideoInfo = null;
-            lastParseUrl = "";
-
-            if (window.self !== window.top) isTopInfoReady = false; // Iframe 中重置就绪状态
-            
-            // 立即刷新一次顶层信息
-            if (window.self !== window.top) {
-                 chrome.runtime.sendMessage({ action: "getTabTitle" }, (response) => {
-                     if (response) {
-                         if (response.title) cachedTopTitle = response.title;
-                         if (response.url) cachedTopUrl = response.url;
-                         isTopInfoReady = true;
-                     }
-                 });
-            }
-            setTimeout(checkAndApplyAutoMatch, 1000);
-        };
-
-        video.addEventListener('loadedmetadata', resetState);
-        video.addEventListener('durationchange', resetState); 
-        video.addEventListener('emptied', resetState);
-        video.addEventListener('seeking', () => { 
-            if(video.currentTime < 1) hasSkippedIntro = false; 
-        });
-        
-        videoLoadStartTime = Date.now();
-        video.dataset.hasSkipperListener = 'true';
-    }
+    playbackStates.set(video, freshState());
+    const reset = () => {
+        playbackStates.set(video, freshState());
+        if (window.self !== window.top) { isTopInfoReady = false; refreshTopInfo(); }
+    };
+    video.addEventListener('loadedmetadata', reset);
+    video.addEventListener('emptied', reset);
+    video.addEventListener('timeupdate', handleTimeUpdate);
+    video.addEventListener('ended', () => handleEnded(video));
+    video.addEventListener('pause', () => autoUpdateFavorites(video, true));
+    video.addEventListener('seeking', () => {
+        const state = playbackStates.get(video);
+        if (!state.restoring && !state.resumed) state.userSeeking = true;
+        if (video.currentTime < 1) state.skippedIntro = false;
+    });
 }
 
-function autoUpdateFavorites(video, overrideTime = null, overrideDuration = null) {
-    if (!config.autoUpdateFav) return;
-
-    // 1. 如果是在 Iframe 里，我们不再自己保存，而是发送消息给主页面让它保存
-    // 这样能确保解析的标题来源和手动收藏时完全一致
-    if (window.self !== window.top) {
-        const now = Date.now();
-        // 限制发送频率，避免消息轰炸 (每 5 秒同步一次)
-        if (now - lastFavUpdateTime < 5000) return;
-        
-        chrome.runtime.sendMessage({
-            action: "syncVideoProgress",
-            time: video.currentTime,
-            duration: video.duration
-        });
-        lastFavUpdateTime = now;
-        return; // Iframe 的任务结束，直接退出
+function getPlaybackContext(video) {
+    const info = getCachedVideoInfo();
+    const found = SkipperCore.findFavorite(config.favorites, info.seriesName, null, info);
+    syncCatalog(info, found);
+    const item = found?.[1];
+    const url = cachedTopUrl || window.location.href;
+    const settings = SkipperCore.settings(config, config.whitelistMode ? item : null, url);
+    let state = playbackStates.get(video);
+    if (!state) { state = freshState(); playbackStates.set(video, state); }
+    const identity = `${url}|${info.seriesName}|${info.episodeName}|${video.currentSrc || video.src || ''}`;
+    if (state.identity && state.identity !== identity) {
+        state = freshState(); playbackStates.set(video, state);
     }
+    state.identity = identity;
+    return { info, found, item, url, settings, state };
+}
 
-    // 2. 以下逻辑只在主页面 (Top Frame) 执行 ===========================
-    
-    // 确定时间：如果有外部传入的时间(来自Iframe)，就用外部的；否则用自己的(针对非Iframe视频)
-    const currentTime = overrideTime !== null ? overrideTime : (video ? video.currentTime : 0);
-    const duration = overrideDuration !== null ? overrideDuration : (video ? video.duration : 0);
-    
-    // 主页面解析：这里的 parseVideoInfo 拥有最高权限，能看到 H1 和 URL
-    const info = getCachedVideoInfo(); // 使用缓存
-    const sName = info.seriesName;
-    const latestFavs = config.favorites || {}; // 直接读内存
-
-    // 只有已收藏的才更新
-    if (!latestFavs[sName]) return;
-    
-    // 【优化】: 增加写入节流
-    // 如果进度变化很小(比如暂停时)，不要重复写入 storage
-    const existingItem = latestFavs[sName];
-    if (Math.abs(existingItem.time - currentTime) < 2 && existingItem.url === window.location.href) {
-        return; // 变化太小，跳过写入
+function restoreProgress(video, context) {
+    const { info, url, settings, state } = context;
+    const item = context.item?.episodeProgress?.[SkipperCore.canonicalUrl(url)] || context.item;
+    if (state.restoring) {
+        if (video.seeking || Math.abs(video.currentTime - state.restoreTarget) > 2) return false;
+        state.restoring = false;
+        state.resumed = true;
     }
-
-    // 【新增】: 仅记录最大阅读集数保护
-    // 如果用户开启了 "onlySaveMaxEpisode"，则需要判断集数是否倒退
-    if (config.onlySaveMaxEpisode && existingItem.episode) {
-        const getEpNum = (epStr) => {
-            if (!epStr) return -1;
-            const m = epStr.match(/(\d+)/); // 提取第一个数字
-            return m ? parseInt(m[1], 10) : -1;
-        };
-
-        const oldNum = getEpNum(existingItem.episode);
-        const newNum = getEpNum(info.episodeName);
-
-        // 只有当能够提取出有效数字时才进行比较
-        if (oldNum !== -1 && newNum !== -1) {
-            // 如果新集数 < 旧集数，则视为倒退，不更新记录
-            // 但如果集数相等，说明是同一集，允许更新进度
-            if (newNum < oldNum) {
-                // console.log(`Skipper: 忽略旧集数更新 (${newNum} < ${oldNum})`);
-                return;
-            }
+    if (state.resumed) return true;
+    // Give SPA titles and the site's own resume logic time to settle before any write.
+    if (Date.now() - state.loadedAt < 1000) return false;
+    let target = null;
+    const nearEnd = time => video.duration - time < 30 || time / video.duration > 0.95;
+    if (!state.userSeeking && settings.enabled && settings.autoRestart && nearEnd(video.currentTime)) {
+        target = settings.enableIntro ? settings.introTime : 0;
+    } else if (!state.userSeeking && item && video.currentTime <= 5 && SkipperCore.sameEpisode(item, info, url) && item.time > 5) {
+        target = nearEnd(item.time) ? (settings.enabled && settings.enableIntro ? settings.introTime : 0) : item.time;
+    }
+    if (target !== null && target >= 0 && target < video.duration && Math.abs(target - video.currentTime) > 1) {
+        try {
+            state.restoring = true;
+            state.restoreTarget = target;
+            video.currentTime = target;
+            state.skippedIntro = target >= settings.introTime;
+            state.cooldown = Date.now() + 2000;
+            showToast(`↪ 已恢复到 ${Math.floor(target)} 秒`);
+            return false;
+        } catch {
+            state.restoring = false;
+            return false;
         }
     }
+    state.resumed = true;
+    return true;
+}
 
-    // 构造新数据
-    const newData = {
-        ...existingItem,
-        series: sName,
-        episode: info.episodeName,
-        site: info.siteName, // 这里用的就是主页面的解析结果，和手动收藏绝对一致！
-        // URL 始终使用主页面的 URL，彻底解决了 Iframe 乱码链接的问题
-        url: window.location.href,
-        time: Math.floor(currentTime),
-        duration: Math.floor(duration),
-        timestamp: Date.now()
+function autoUpdateFavorites(video, force = false) {
+    if (pendingEpisodeSelection()) return;
+    if (!config.autoUpdateFav || !isTopInfoReady || video !== findMainVideo()) return;
+    if (!Number.isFinite(video.duration) || video.duration <= 0 || !Number.isFinite(video.currentTime)) return;
+    const { info, found, url, state } = getPlaybackContext(video);
+    if (!found || !state.resumed || state.restoring || video.seeking) return;
+    if (!force && Date.now() - state.lastSavedAt < 2000) return;
+    if (!force && state.lastSavedTime === Math.floor(video.currentTime)) return;
+    state.lastSavedAt = Date.now();
+    state.lastSavedTime = Math.floor(video.currentTime);
+    saveStatus = { state: '保存中', time: saveStatus.time, error: null };
+    SkipperCore.mutate({ type: 'progress', key: found[0], id: found[1].id,
+        episode: info.episodeName, site: info.siteName, url, time: video.currentTime,
+        collectionId: info.collectionId, collectionUrl: info.collectionUrl,
+        duration: video.duration, timestamp: Date.now() }, (data, error) => {
+        saveStatus = { state: error ? '保存失败' : '已保存', time: error ? saveStatus.time : Date.now(), error: error || null };
+        if (error) { state.lastSavedAt = 0; state.lastSavedTime = null; console.error('Skipper:', error); }
+    });
+}
+
+function attemptNext(video, state, callback) {
+    state.nextAttempted = true;
+    if (tryClickNext()) { state.switching = true; callback(true); return; }
+    if (window.self !== window.top) {
+        chrome.runtime.sendMessage({ action: 'clickNextInTop' }, response => {
+            const clicked = !chrome.runtime.lastError && !!response?.clicked;
+            state.switching = clicked;
+            callback(clicked);
+        });
+    } else callback(false);
+}
+
+function restartVideo(video, settings, state) {
+    const target = settings.enableIntro && settings.introTime < video.duration ? settings.introTime : 0;
+    video.currentTime = target;
+    state.skippedIntro = true;
+    state.finishing = false;
+    state.handledEnd = false;
+    state.nextAttempted = false;
+    state.cooldown = Date.now() + 2000;
+    const playing = video.play();
+    playing?.catch(() => showToast('已回到开头，请点击播放'));
+}
+
+function handleEnded(video) {
+    if (pendingEpisodeSelection()) return;
+    if (video !== findMainVideo() || !isTopInfoReady) return;
+    const { settings, state } = getPlaybackContext(video);
+    autoUpdateFavorites(video, true);
+    if (!settings.enabled || !Number.isFinite(video.duration) || video.duration < settings.minDuration || state.switching || state.handledEnd) return;
+    state.handledEnd = true;
+    const finish = clicked => {
+        if (playbackStates.get(video) !== state) return;
+        if (clicked) showToast('🚀 正在切集...');
+        else if (settings.autoRestart) restartVideo(video, settings, state);
     };
-
-    // 如果是 Iframe 同步过来的，我们只更新时间，不轻易改 URL (防止单页应用 URL 没变的情况)
-    // 但通常保持 window.location.href 是最安全的，因为它就是用户看到的链接
-    
-    latestFavs[sName] = newData;
-    chrome.storage.local.set({ favorites: latestFavs });
-    
-    // 更新内存缓存
-    config.favorites = latestFavs;
+    if (settings.autoPlayNext && !state.nextAttempted) attemptNext(video, state, finish);
+    else finish(false);
 }
 
 function handleTimeUpdate(e) {
-    // 【新增】检测 SPA URL 变化
-    // 很多网站（如 B站）切换集数时页面不刷新，但 URL 变了
-    if (window.location.href !== lastUrl) {
-        lastUrl = window.location.href;
-        console.log("Skipper: 检测到 URL 变化，强制重置状态");
-        
-        // 强制重置状态，重新匹配规则
-        cachedVideoInfo = null; // 清除缓存
-        lastParseUrl = "";
-        
-        // 重新运行匹配逻辑
-        checkAndApplyAutoMatch();
-        
-        // 可能需要重置其他状态，例如
-        hasSkippedIntro = false;
-        hasTriggeredRestart = false;
-        isSwitchingEpisode = false;
-        videoLoadStartTime = Date.now();
-    }
-
-    const now = Date.now();
-    if (now - lastCheckTime < 500) {
-        return;
-    }
-    lastCheckTime = now;
-
+    if (pendingEpisodeSelection()) return;
     const video = e.target;
+    if (video !== findMainVideo() || !Number.isFinite(video.duration) || video.duration <= 0) return;
+    if (window.self !== window.top && Date.now() - topInfoRequestedAt > 3000) refreshTopInfo();
+    if (!isTopInfoReady) return;
+    const context = getPlaybackContext(video);
+    const { settings, state } = context;
+    if (Date.now() - state.checkedAt < 500) return;
+    state.checkedAt = Date.now();
+    if (!restoreProgress(video, context)) return;
     autoUpdateFavorites(video);
-
-    // 白名单模式：仅对已收藏的番剧执行跳过，并应用每个收藏的专属设置
-    let currentIntro = config.introTime;
-    let currentOutro = config.outroTime;
-    let currentMinDuration = config.minDuration;
-    let currentEnableIntro = config.enableIntro;
-    let currentEnableOutro = config.enableOutro;
-
-    if (config.whitelistMode === true) {
-        const info = getCachedVideoInfo();
-        const fav = config.favorites && config.favorites[info.seriesName];
-        if (!fav) return;
-        if (fav.autoSkipEnabled === false) return; // 该收藏单独关闭了跳过
-
-        if (fav.introTime !== undefined) {
-            currentIntro = fav.introTime;
-            currentEnableIntro = (fav.introTime > 0);
-        }
-        if (fav.outroTime !== undefined) {
-            currentOutro = fav.outroTime;
-            currentEnableOutro = (fav.outroTime > 0);
-        }
-        if (fav.minDuration !== undefined) currentMinDuration = fav.minDuration;
-    } else {
-        if (config.autoSkipEnable !== true) return;
+    if (!settings.enabled || video.duration < settings.minDuration || state.switching || video.seeking) return;
+    const outroStart = video.duration - (settings.enableOutro ? settings.outroTime : 0);
+    if (settings.enableIntro && settings.introTime < outroStart && !state.skippedIntro && video.currentTime > 0.5 && video.currentTime < settings.introTime) {
+        video.currentTime = settings.introTime;
+        state.skippedIntro = true;
+        showToast('🚀 跳过片头');
     }
-
-    if (video.duration < currentMinDuration) return;
-
-    if (config.autoRestart === true && !hasTriggeredRestart) {
-        if (Date.now() - videoLoadStartTime < 4000) {
-            const timeLeft = video.duration - video.currentTime;
-            if (timeLeft < 30 || video.currentTime / video.duration > 0.95) {
-                const outroTrigger = video.duration - (currentEnableOutro ? currentOutro : 0);
-                let targetPos = currentEnableIntro ? currentIntro : 0;
-                if (targetPos >= outroTrigger) { targetPos = 0; }
-                video.currentTime = targetPos;
-                showToast(`↺ 已重置到 ${targetPos}秒`);
-                hasTriggeredRestart = true;
-                hasSkippedIntro = true;
-                restartCooldownTime = Date.now() + 5000;
-            }
-        }
-    }
-
-    const outroTriggerTime = video.duration - (currentEnableOutro ? currentOutro : 0);
-    const isOverlap = currentIntro >= outroTriggerTime;
-
-    if (currentEnableIntro === true && !isOverlap) {
-        if (video.currentTime < currentIntro && !hasSkippedIntro && video.currentTime > 0.5) {
-             if (Date.now() < restartCooldownTime) {
-                 hasSkippedIntro = true;
-             } else if (currentIntro < video.duration) {
-                video.currentTime = currentIntro;
-                hasSkippedIntro = true;
-                showToast(`🚀 跳过片头`);
-            }
-        }
-    }
-
-    if (currentEnableOutro === true) {
-        if (Date.now() < restartCooldownTime) return;
-        if (currentOutro > 0) {
-            if (video.currentTime > outroTriggerTime && video.currentTime < video.duration) {
-                if (Date.now() - videoLoadStartTime < 4000 && !hasTriggeredRestart) return;
-                if (isSwitchingEpisode) return;
-                if (config.autoPlayNext === true) {
-                    const success = tryClickNext();
-                    if (success) {
-                        isSwitchingEpisode = true;
-                        showToast('🚀 正在切集...');
-                        return;
-                    }
-                }
-                if (!isSwitchingEpisode) { 
-                    video.currentTime = video.duration; 
-                    showToast(`🚀 跳过片尾`);
-                }
-            }
-        }
+    if (settings.enableOutro && settings.outroTime > 0 && outroStart > 0 && video.currentTime >= outroStart && video.currentTime < video.duration && Date.now() >= state.cooldown && !state.finishing) {
+        state.finishing = true;
+        const finish = clicked => {
+            if (playbackStates.get(video) !== state) return;
+            if (clicked) showToast('🚀 正在切集...');
+            else { video.currentTime = video.duration; showToast('🚀 跳过片尾'); }
+        };
+        if (settings.autoPlayNext) attemptNext(video, state, finish);
+        else finish(false);
     }
 }
 

@@ -13,7 +13,72 @@ let currentFavorites = {};
 let currentFolders = [];
 let targetMoveSeries = null;
 let visibleCount = 20;
+let popupConfig = {};
+let currentPageInfo = null;
+let sortMode = 'recent';
+let stableOrder = new Map();
+const expandedEpisodes = new Set();
 const PAGE_SIZE = 20;
+
+document.addEventListener('DOMContentLoaded', () => {
+    chrome.storage.local.get({ favoriteSortMode: 'recent' }, data => {
+        sortMode = data.favoriteSortMode === 'name' ? 'name' : 'recent';
+        document.getElementById('sortMode').value = sortMode;
+        stableOrder.clear(); renderFavoritesList();
+    });
+    document.getElementById('sortMode').addEventListener('change', e => {
+        sortMode = e.target.value; stableOrder.clear();
+        chrome.storage.local.set({ favoriteSortMode: sortMode }); renderFavoritesList();
+    });
+    document.getElementById('refreshOrder').addEventListener('click', () => { stableOrder.clear(); renderFavoritesList(); });
+    for (const [id, isIntro] of [['setIntroHere', true], ['setOutroHere', false]]) {
+        document.getElementById(id).addEventListener('click', () => {
+            chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+                if (!tabs.length) return;
+                chrome.tabs.sendMessage(tabs[0].id, { action: 'getRequestVideoInfo' }, video => {
+                    if (chrome.runtime.lastError || !video || !Number.isFinite(video.time) || !Number.isFinite(video.duration) || video.duration <= 0) { showFloatingToast('未检测到可用视频，请刷新页面后重试'); return; }
+                    const seconds = Math.max(0, Math.floor(isIntro ? video.time : video.duration - video.time));
+                    const patch = isIntro ? { introTime: seconds, enableIntro: true } : { outroTime: seconds, enableOutro: true };
+                    chrome.tabs.sendMessage(tabs[0].id, { action: 'getNiceTitle' }, { frameId: 0 }, info => {
+                        if (chrome.runtime.lastError || !info) { showFloatingToast('无法识别当前页面，请刷新后重试'); return; }
+                        const item = currentFavorites[info.series];
+                        const saved = () => {
+                            document.getElementById(isIntro ? 'introTime' : 'outroTime').value = seconds;
+                            document.getElementById(isIntro ? 'enableIntro' : 'enableOutro').checked = true;
+                            showFloatingToast(isIntro ? `片头结束设为 ${seconds} 秒` : `片尾设为距结尾 ${seconds} 秒`);
+                        };
+                        if (document.getElementById('whitelistMode').checked) {
+                            if (!item) { showFloatingToast('请先收藏当前视频，再设置跳过位置'); return; }
+                            mutateFavorites({ type: 'patch', key: info.series, id: item.id, patch,
+                                episodeUrl: info.collectionId && document.getElementById('episodeScope').checked ? info.url : undefined }, saved);
+                        } else chrome.storage.local.set(patch, () => { if (chrome.runtime.lastError) showFloatingToast('设置保存失败'); else saved(); });
+                    });
+                });
+            });
+        });
+    }
+    document.getElementById('copyDiagnostics').addEventListener('click', () => {
+        const publish = async report => {
+            const output = JSON.stringify(report, null, 2);
+            const box = document.getElementById('diagnosticText'); box.value = output; box.style.display = 'none';
+            try { await navigator.clipboard.writeText(output); document.getElementById('diagnosticStatus').textContent = '诊断信息已复制，可粘贴反馈。'; }
+            catch { box.style.display = 'block'; box.select?.(); document.getElementById('diagnosticStatus').textContent = '自动复制失败，请在下方手动复制。'; }
+        };
+        chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+            const base = { version: chrome.runtime.getManifest().version, generatedAt: new Date().toISOString(),
+                favoriteCount: Object.keys(currentFavorites).length, sortMode };
+            if (!tabs.length) { publish({ ...base, error: '没有活动标签页' }); return; }
+            chrome.tabs.sendMessage(tabs[0].id, { action: 'diagnostics' }, { frameId: 0 }, report => {
+                const error = chrome.runtime.lastError?.message;
+                chrome.runtime.sendMessage({ action: 'getSaveStatus', tabId: tabs[0].id }, saveStatus => {
+                    const backgroundError = chrome.runtime.lastError?.message;
+                    publish({ ...base, ...(report || {}), ...(saveStatus ? { saveStatus } : {}),
+                        ...(error || !report ? { error: error || '页面未响应，请刷新视频页' } : {}), ...(backgroundError ? { backgroundError } : {}) });
+                });
+            });
+        });
+    });
+});
 
 document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.local.get({
@@ -38,44 +103,35 @@ document.addEventListener('DOMContentLoaded', () => {
     }, (items) => {
         try { setupTagSettings(items.customTagRules); } catch(e) { console.error("TagSettings Error:", e); }
 
+        popupConfig = items;
         loadConfigToUI(items);
         currentFavorites = items.favorites;
-        currentFolders = items.favFolders;
+        currentFolders = [...new Set([...items.favFolders, ...Object.values(items.favorites).filter(x => x && typeof x === 'object').map(x => x.folder || '默认收藏')])];
 
         document.getElementById('autoUpdateFav').checked = items.autoUpdateFav;
         document.getElementById('whitelistMode').checked = items.whitelistMode || false;
 
         renderFolderSelect();
 
+        document.getElementById('currentSeriesHint').textContent = items.whitelistMode ? '未收藏时修改默认设置，收藏后生效' : '全局设置';
         chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
             if (tabs.length === 0) return;
             chrome.tabs.sendMessage(tabs[0].id, { action: "getNiceTitle" }, { frameId: 0 }, (titleResponse) => {
+                if (chrome.runtime.lastError) return;
                 if (titleResponse && titleResponse.series) {
+                    currentPageInfo = titleResponse;
+                    document.getElementById('episodeScopeRow').style.display = titleResponse.collectionId ? 'block' : 'none';
                     const seriesName = titleResponse.series;
                     const favItem = currentFavorites[seriesName];
-                    if (favItem && favItem.folder) {
-                        const select = document.getElementById('folderSelect');
-                        if (currentFolders.includes(favItem.folder)) {
-                            select.value = favItem.folder;
+                    if (favItem && items.whitelistMode) {
+                        document.getElementById('currentSeriesHint').textContent = `当前收藏：${seriesName}（独立设置）`;
+                        if (favItem.folder && currentFolders.includes(favItem.folder)) {
+                            document.getElementById('folderSelect').value = favItem.folder;
                             renderFavoritesList();
                         }
-
-                        if (favItem.autoSkipEnabled !== undefined) {
-                            document.getElementById('autoSkipEnable').checked = favItem.autoSkipEnabled;
-                            updateStatusText(favItem.autoSkipEnabled);
-                        }
-
-                        if (favItem.introTime !== undefined) {
-                            document.getElementById('introTime').value = favItem.introTime;
-                            document.getElementById('enableIntro').checked = (favItem.introTime > 0);
-                        }
-                        if (favItem.outroTime !== undefined) {
-                            document.getElementById('outroTime').value = favItem.outroTime;
-                            document.getElementById('enableOutro').checked = (favItem.outroTime > 0);
-                        }
-                        if (favItem.minDuration !== undefined) {
-                            document.getElementById('minDuration').value = favItem.minDuration;
-                        }
+                        const effective = SkipperCore.settings(items, favItem);
+                        loadConfigToUI({ ...items, ...effective, autoSkipEnable: favItem.autoSkipEnabled !== false });
+                        updateStatusText(favItem.autoSkipEnabled !== false);
                     }
 
                 }
@@ -91,8 +147,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const name = prompt("请输入新收藏夹名称 (例如: 补番中):");
             if (name && !currentFolders.includes(name)) {
                 currentFolders.push(name);
-                saveFolders();
-                renderFolderSelect(name);
+                mutateFavorites({ type: 'addFolder', folder: name }, () => renderFolderSelect(name));
             }
         });
 
@@ -110,13 +165,7 @@ document.addEventListener('DOMContentLoaded', () => {
                  return;
              }
              if (confirm(`删除文件夹 "${folder}"？\n其中的番剧将移动到 "默认收藏"。`)) {
-                 Object.values(currentFavorites).forEach(item => {
-                     if (item.folder === folder) item.folder = "默认收藏";
-                 });
-                 currentFolders = currentFolders.filter(f => f !== folder);
-                 saveDataAndRender();
-                 saveFolders();
-                 renderFolderSelect("默认收藏");
+                  mutateFavorites({ type: 'deleteFolder', folder }, () => renderFolderSelect('默认收藏'));
              }
         });
 
@@ -163,7 +212,7 @@ document.addEventListener('DOMContentLoaded', () => {
         currentFolders.forEach(folder => {
             const div = document.createElement('div');
             div.className = 'check-item';
-            div.innerHTML = `<label><input type="checkbox" class="folder-chk" value="${folder}" checked> ${folder}</label>`;
+            div.innerHTML = `<label><input type="checkbox" class="folder-chk" value="${SkipperCore.escapeHtml(folder)}" checked> ${SkipperCore.escapeHtml(folder)}</label>`;
             listDiv.appendChild(div);
         });
 
@@ -204,13 +253,9 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const exportData = {
-            version: "4.2",
-            timestamp: Date.now(),
-            dateStr: new Date().toLocaleString(),
-            folders: selectedFolders,
-            favorites: filteredFavorites
-        };
+        let exportData;
+        try { exportData = SkipperCore.makeBackup(filteredFavorites, selectedFolders); }
+        catch (error) { showFloatingToast(error.message); return; }
 
         const date = new Date();
         const dateStr = date.getFullYear() +
@@ -247,65 +292,68 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!targetMoveSeries || !currentFavorites[targetMoveSeries]) return;
 
         const newFolder = moveSelect.value;
-        currentFavorites[targetMoveSeries].folder = newFolder;
-
-        saveDataAndRender();
-
-        moveModal.style.display = 'none';
-        targetMoveSeries = null;
-
-        showFloatingToast(`✅ 已移动到 [${newFolder}]`);
+        mutateFavorites({ type: 'move', key: targetMoveSeries, id: currentFavorites[targetMoveSeries].id, folder: newFolder }, () => {
+            moveModal.style.display = 'none';
+            targetMoveSeries = null;
+            showFloatingToast(`✅ 已移动到 [${newFolder}]`);
+        });
+        document.getElementById('episodeScope').addEventListener('change', () => {
+            const item = currentPageInfo && currentFavorites[currentPageInfo.series];
+            if (!item) return;
+            const effective = SkipperCore.settings(popupConfig, item, document.getElementById('episodeScope').checked ? currentPageInfo.url : undefined);
+            loadConfigToUI({ ...popupConfig, ...effective, autoSkipEnable: effective.enabled });
+        });
     });
 
     chrome.storage.onChanged.addListener((changes, namespace) => {
-        if (namespace === 'local' && changes.favorites) {
-            currentFavorites = changes.favorites.newValue || {};
-            renderFavoritesList();
-        }
+        if (namespace !== 'local') return;
+        if (changes.favorites) currentFavorites = changes.favorites.newValue || {};
+        if (changes.favFolders) { currentFolders = changes.favFolders.newValue || defaultFolders; renderFolderSelect(); }
+        if (changes.favorites || changes.favFolders) renderFavoritesList();
     });
 });
 
 function handleImport(data) {
-    if (!data.favorites || !data.folders) {
-        alert("❌ 文件内容不完整，无法导入");
-        return;
-    }
-
-    const confirmMsg = `准备导入备份：\n📅 时间: ${data.dateStr || '未知时间'}\n📁 包含 ${Object.keys(data.favorites).length} 个番剧\n\n注意：同名番剧将被覆盖，新番剧将添加。是否继续？`;
-
-    if (!confirm(confirmMsg)) return;
-
-    const newFoldersSet = new Set([...currentFolders, ...data.folders]);
-    currentFolders = Array.from(newFoldersSet);
-
-    currentFavorites = { ...currentFavorites, ...data.favorites };
-
-    for (let key in currentFavorites) {
-        if (!currentFavorites[key].folder) {
-            currentFavorites[key].folder = "默认收藏";
-        }
-    }
-
-    saveFolders();
-    saveDataAndRender();
-
-    const currentSelect = document.getElementById('folderSelect').value;
-    renderFolderSelect(currentSelect);
-
-    showFloatingToast(`✅ 成功导入 ${Object.keys(data.favorites).length} 条记录`);
+    let parsed;
+    try { parsed = SkipperCore.parseBackup(data); }
+    catch (error) { alert(`❌ ${error.message}`); return; }
+    const count = Object.keys(parsed.favorites).length;
+    if (!confirm(`导入 ${count} 部番剧？同名记录保留更新时间较新的进度。`)) return;
+    mutateFavorites({ type: 'import', data }, () => showFloatingToast(`✅ 已导入 ${count} 条记录`));
 }
 
 document.getElementById('autoUpdateFav').addEventListener('change', (e) => { chrome.storage.local.set({ autoUpdateFav: e.target.checked }); });
 document.getElementById('whitelistMode').addEventListener('change', (e) => {
     const isOn = e.target.checked;
-    chrome.storage.local.set({ whitelistMode: isOn });
-    showFloatingToast(isOn ? '🎯 白名单模式已开启，仅对已收藏生效' : '🌐 已切换为全局模式');
+    chrome.storage.local.set({ whitelistMode: isOn }, () => {
+        if (chrome.runtime.lastError) { showFloatingToast(chrome.runtime.lastError.message); return; }
+        chrome.storage.local.get(popupConfig, items => {
+            popupConfig = items;
+            loadConfigToUI(items);
+            updateStatusText(items.autoSkipEnable);
+            document.getElementById('currentSeriesHint').textContent = isOn ? '未收藏时修改默认设置，收藏后生效' : '全局设置';
+            if (!isOn) return;
+            chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+                if (!tabs.length) return;
+                chrome.tabs.sendMessage(tabs[0].id, { action: 'getNiceTitle' }, { frameId: 0 }, info => {
+                    if (chrome.runtime.lastError || !info) return;
+                    const item = currentFavorites[info.series];
+                    if (!item) return;
+                    loadConfigToUI({ ...items, ...SkipperCore.settings(items, item), autoSkipEnable: item.autoSkipEnabled !== false });
+                    updateStatusText(item.autoSkipEnabled !== false);
+                    document.getElementById('currentSeriesHint').textContent = `当前收藏：${info.series}（独立设置）`;
+                });
+            });
+        });
+        showFloatingToast(isOn ? '🎯 白名单模式已开启，仅对已收藏生效' : '🌐 已切换为全局模式');
+    });
 });
 
 document.getElementById('addFavBtn').addEventListener('click', () => {
     chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
         if (tabs.length === 0) return;
         chrome.tabs.sendMessage(tabs[0].id, { action: "getNiceTitle" }, { frameId: 0 }, (titleResponse) => {
+            if (chrome.runtime.lastError) { showFloatingToast("请刷新视频页面后重试"); return; }
             chrome.tabs.sendMessage(tabs[0].id, { action: "getRequestVideoInfo" }, (videoResponse) => {
                 if (chrome.runtime.lastError) { }
                 if (!videoResponse) { showFloatingToast("❌ 失败：未检测到视频"); return; }
@@ -315,7 +363,13 @@ document.getElementById('addFavBtn').addEventListener('click', () => {
                         finalData.series = titleResponse.series;
                         if (finalData.episode === "观看中" && titleResponse.episode) finalData.episode = titleResponse.episode;
                     }
-                    if (titleResponse.url) finalData.url = titleResponse.url;
+                    if (titleResponse.url) finalData.url = SkipperCore.resumeUrl(titleResponse.url, finalData.time);
+                    finalData.aliases = [titleResponse.sourceSeries || titleResponse.series];
+                    if (titleResponse.collectionId) {
+                        finalData.collectionId = titleResponse.collectionId;
+                        finalData.collectionUrl = titleResponse.collectionUrl;
+                        finalData.episode = titleResponse.episode;
+                    }
                     if (titleResponse.site) finalData.site = titleResponse.site;
                 }
 
@@ -334,17 +388,25 @@ document.getElementById('addFavBtn').addEventListener('click', () => {
                 finalData.outroTime = parseInt(document.getElementById('outroTime').value) || 0;
                 finalData.minDuration = parseInt(document.getElementById('minDuration').value) || 0;
 
-                if (currentFavorites[finalData.series]) {
-                    const old = currentFavorites[finalData.series];
-                    if (old.autoSkipEnabled !== undefined) finalData.autoSkipEnabled = old.autoSkipEnabled;
-                    if (old.introTime !== undefined) finalData.introTime = old.introTime;
-                    if (old.outroTime !== undefined) finalData.outroTime = old.outroTime;
-                    if (old.minDuration !== undefined) finalData.minDuration = old.minDuration;
+                for (const key of ['enableIntro', 'enableOutro', 'autoRestart', 'autoPlayNext']) {
+                    finalData[key] = document.getElementById(key).checked;
                 }
-
-                currentFavorites[finalData.series] = finalData;
-                chrome.storage.local.set({ favorites: currentFavorites }, () => {
-                    renderFavoritesList();
+                if (finalData.collectionId && !SkipperCore.findFavorite(currentFavorites, finalData.series, null, finalData)) {
+                    finalData.enableIntro = false;
+                    finalData.enableOutro = false;
+                }
+                mutateFavorites({ type: 'add', item: finalData }, () => {
+                    if (finalData.collectionId) {
+                        const saved = SkipperCore.findFavorite(currentFavorites, finalData.series, null, finalData);
+                        if (saved) {
+                            currentPageInfo = { ...titleResponse, series: saved[0] };
+                            document.getElementById('episodeScopeRow').style.display = 'block';
+                            document.getElementById('episodeScope').checked = false;
+                            document.getElementById('currentSeriesHint').textContent = `当前合集：${saved[0]}（默认设置）`;
+                            const effective = SkipperCore.settings(popupConfig, saved[1]);
+                            loadConfigToUI({ ...popupConfig, ...effective, autoSkipEnable: effective.enabled });
+                        }
+                    }
                     showFloatingToast(`✅ 已收藏到 [${targetFolder}]\n${finalData.series}`);
                 });
             });
@@ -365,12 +427,15 @@ function showFloatingToast(msg) {
     setTimeout(() => { toast.classList.remove('show'); }, 2000);
 }
 
-function saveFolders() {
-    chrome.storage.local.set({ favFolders: currentFolders });
-}
-function saveDataAndRender() {
-    chrome.storage.local.set({ favorites: currentFavorites }, () => {
+function mutateFavorites(operation, onSaved) {
+    SkipperCore.mutate(operation, (data, error) => {
+        if (error) { showFloatingToast(`❌ ${error}`); return; }
+        currentFavorites = data.favorites;
+        stableOrder.clear();
+        currentFolders = data.favFolders;
+        renderFolderSelect();
         renderFavoritesList();
+        onSaved?.();
     });
 }
 function renderFolderSelect(selectValue) {
@@ -407,7 +472,7 @@ function renderFavoritesList() {
 
     const fragment = document.createDocumentFragment();
 
-    let sortedItems = Object.values(currentFavorites);
+    let sortedItems = Object.values(currentFavorites).filter(item => item && typeof item.series === 'string' && SkipperCore.validUrl(item.url));
 
     if (currentFolder !== "__ALL__") {
         sortedItems = sortedItems.filter(item => {
@@ -416,11 +481,16 @@ function renderFavoritesList() {
         });
     }
 
-    sortedItems.sort((a, b) => b.timestamp - a.timestamp);
+    const recentTime = item => Math.max(item.timestamp || 0, item.lastOpenedAt || 0);
+    sortedItems.sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned)
+        || (a.pinned && b.pinned ? (a.pinnedAt || 0) - (b.pinnedAt || 0) : 0)
+        || (sortMode === 'name' ? a.series.localeCompare(b.series, 'zh-CN')
+            : stableOrder.size ? (stableOrder.get(a.id || a.series) ?? 100000) - (stableOrder.get(b.id || b.series) ?? 100000) : recentTime(b) - recentTime(a)));
+    sortedItems.forEach((item, index) => { if (!stableOrder.has(item.id || item.series)) stableOrder.set(item.id || item.series, index); });
 
     if (sortedItems.length === 0) {
         const msg = currentFolder === "__ALL__" ? "暂无任何收藏" : `"${currentFolder}" 为空`;
-        listDiv.innerHTML = `<div style="padding:15px; text-align:center; color:#999; font-size:12px;">${msg}</div>`;
+        listDiv.innerHTML = `<div style="padding:15px; text-align:center; color:#999; font-size:12px;">${SkipperCore.escapeHtml(msg)}</div>`;
         return;
     }
 
@@ -439,20 +509,22 @@ function renderFavoritesList() {
 
         let folderBadge = '';
         if (currentFolder === "__ALL__") {
-            folderBadge = `<span style="background:#f0f0f0; color:#888; padding:1px 4px; border-radius:3px; margin-right:4px; font-size:10px; border:1px solid #eee;">${item.folder || '默认'}</span>`;
+            folderBadge = `<span style="background:#f0f0f0; color:#888; padding:1px 4px; border-radius:3px; margin-right:4px; font-size:10px; border:1px solid #eee;">${SkipperCore.escapeHtml(item.folder || '默认')}</span>`;
         }
 
         div.innerHTML = `
-            <div class="fav-series">${item.series}</div>
+            <div class="fav-series">${item.pinned ? '📌 ' : ''}${SkipperCore.escapeHtml(item.series)}</div>
             <div class="fav-episode">
                 <span style="display:flex; align-items:center;">
-                    ${folderBadge} <span class="fav-tag">${item.site}</span>
-                    <span style="max-width: 80px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.episode}</span>
+                    ${folderBadge} <span class="fav-tag">${SkipperCore.escapeHtml(item.site)}</span>
+                    <span style="max-width: 80px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${SkipperCore.escapeHtml(item.episode)}</span>
                 </span>
                 <span class="fav-time">${formatTime(item.time)} / ${formatTime(item.duration)}</span>
             </div>
             <div class="fav-actions" style="position: absolute; right: 5px; top: 5px; display: none;">
                 <button class="btn-move" title="移动文件夹" style="border:1px solid #ddd; background:#fff; cursor:pointer; font-size:10px; margin-right:2px;">📂</button>
+                <button class="btn-pin">${item.pinned ? '取消置顶' : '置顶'}</button>
+                ${item.collectionId || item.episodeProgress ? '<button class="btn-episodes" title="展开集数与进度">选集</button>' : ''}
                 <button class="btn-del" title="删除" style="border:1px solid #ffcccc; background:#fff; color:red; cursor:pointer; font-size:10px;">×</button>
             </div>
         `;
@@ -468,16 +540,50 @@ function renderFavoritesList() {
 
         div.addEventListener('click', (e) => {
             if (e.target.closest('.fav-actions')) return;
-            chrome.tabs.create({ url: item.url });
+            mutateFavorites({ type: 'open', key: item.series, id: item.id }, () => {
+                chrome.tabs.create({ url: SkipperCore.resumeUrl(item.url, item.time) });
+            });
         });
 
         div.querySelector('.btn-del').addEventListener('click', (e) => {
             e.stopPropagation();
             if (confirm(`删除 "${item.series}"?`)) {
-                delete currentFavorites[item.series];
-                saveDataAndRender();
+                mutateFavorites({ type: 'delete', key: item.series, id: item.id });
             }
         });
+        div.querySelector('.btn-episodes')?.addEventListener('click', e => {
+            e.stopPropagation();
+            const key = item.id || item.series;
+            if (expandedEpisodes.has(key)) expandedEpisodes.delete(key); else expandedEpisodes.add(key);
+            renderFavoritesList();
+        });
+        div.querySelector('.btn-pin').addEventListener('click', e => {
+            e.stopPropagation(); mutateFavorites({ type: 'pin', key: item.series, id: item.id, pinned: !item.pinned });
+        });
+        if (expandedEpisodes.has(item.id || item.series)) {
+            const panel = document.createElement('div'); panel.className = 'episode-panel';
+            panel.addEventListener('click', e => e.stopPropagation());
+            const records = Object.values(item.episodeProgress || {});
+            if (!records.some(r => SkipperCore.canonicalUrl(r.url) === SkipperCore.canonicalUrl(item.url))) records.push(item);
+            const entries = item.catalog?.length ? item.catalog : records.map(r => ({ number: SkipperCore.episodeNumber(r.episode), title: r.episode, record: r }));
+            [...entries].sort((a, b) => (a.number ?? 0) - (b.number ?? 0)).forEach(entry => {
+                const matches = records.filter(r => SkipperCore.episodeNumber(r.episode) === entry.number);
+                const record = entry.record || (matches.length === 1 ? matches[0] : null);
+                const state = !record || !record.time ? '未看' : record.duration > 0 && (record.time / record.duration >= .95 || record.duration - record.time < 30) ? '已看完' : '看到一半';
+                const button = document.createElement('button');
+                button.textContent = `${entry.number === null ? entry.title : `第${entry.number}集`} · ${state}${record?.time ? ` · ${formatTime(record.time)}` : ''}`;
+                button.title = entry.title;
+                button.addEventListener('click', e => {
+                    e.stopPropagation();
+                    let url = record?.url;
+                    if (!url && item.collectionId && entry.number !== null) { const target = new URL(item.url); target.searchParams.delete('t'); target.searchParams.set('skipper_collection', item.collectionId); target.searchParams.set('skipper_episode', String(entry.number)); url = target.href; }
+                    if (SkipperCore.validUrl(url)) mutateFavorites({ type: 'open', key: item.series, id: item.id }, () => chrome.tabs.create({ url: SkipperCore.resumeUrl(url, state === '已看完' ? 0 : record?.time || 0) }));
+                });
+                panel.appendChild(button);
+            });
+            if (!item.catalog?.length) { const hint = document.createElement('div'); hint.className = 'episode-hint'; hint.textContent = '播放合集视频后补全目录'; panel.appendChild(hint); }
+            div.appendChild(panel);
+        }
 
         div.querySelector('.btn-move').addEventListener('click', (e) => {
             e.stopPropagation();
@@ -509,7 +615,7 @@ function renderFavoritesList() {
                     const newName = prompt("请输入新文件夹名称:");
                     if (newName && !currentFolders.includes(newName)) {
                         currentFolders.push(newName);
-                        saveFolders();
+                        mutateFavorites({ type: 'addFolder', folder: newName });
                         renderFolderSelect();
 
                         const tempOpt = document.createElement('option');
@@ -551,6 +657,8 @@ function renderFavoritesList() {
 }
 
 function loadConfigToUI(items) {
+    items.keyForward = items.keyForward || defaultKeys.forward;
+    items.keyRewind = items.keyRewind || defaultKeys.rewind;
     document.getElementById('autoSkipEnable').checked = items.autoSkipEnable;
     document.getElementById('enableIntro').checked = items.enableIntro;
     document.getElementById('enableOutro').checked = items.enableOutro;
@@ -582,95 +690,43 @@ function setupKeyRecorder(elementId, saveCallback) {
     });
 }
 
-function autoSaveSettings(changedKey, changedValue) {
-    const data = {};
-    if (changedKey) {
-        data[changedKey] = changedValue;
-    } else {
-        data.introTime = parseInt(document.getElementById('introTime').value) || 0;
-        data.outroTime = parseInt(document.getElementById('outroTime').value) || 0;
-        data.manualSkipTime = parseInt(document.getElementById('manualSkipTime').value) || 90;
-        data.minDuration = parseInt(document.getElementById('minDuration').value) || 0;
-        data.keyForward = tempKeyForward || defaultKeys.forward;
-        data.keyRewind = tempKeyRewind || defaultKeys.rewind;
-    }
-
-    if (currentFavorites) {
-        chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
-            if (tabs.length > 0) {
-                chrome.tabs.sendMessage(tabs[0].id, { action: "getNiceTitle" }, { frameId: 0 }, (res) => {
-                    if (res && res.series && currentFavorites[res.series]) {
-                        if (data.introTime !== undefined) currentFavorites[res.series].introTime = data.introTime;
-                        if (data.outroTime !== undefined) currentFavorites[res.series].outroTime = data.outroTime;
-                        if (data.minDuration !== undefined) currentFavorites[res.series].minDuration = data.minDuration;
-                        data.favorites = currentFavorites;
-                    }
-                    chrome.storage.local.set(data);
-                });
-            } else {
-                chrome.storage.local.set(data);
-            }
+function autoSaveSettings(key, value) {
+    const perSeries = ['introTime', 'outroTime', 'minDuration', 'autoSkipEnable', 'enableIntro', 'enableOutro', 'autoRestart', 'autoPlayNext'];
+    const saveGlobal = () => chrome.storage.local.set({ [key]: value }, () => {
+        if (chrome.runtime.lastError) showFloatingToast(`❌ ${chrome.runtime.lastError.message}`);
+        else popupConfig[key] = value;
+    });
+    if (!perSeries.includes(key) || !document.getElementById('whitelistMode').checked) { saveGlobal(); return; }
+    chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+        if (!tabs.length) { saveGlobal(); return; }
+        chrome.tabs.sendMessage(tabs[0].id, { action: 'getNiceTitle' }, { frameId: 0 }, res => {
+            const failed = chrome.runtime.lastError;
+            const item = !failed && res && currentFavorites[res.series];
+            if (!item) { saveGlobal(); return; }
+            mutateFavorites({ type: 'patch', key: res.series, id: item.id,
+                episodeUrl: res.collectionId && document.getElementById('episodeScope').checked ? res.url : undefined,
+                patch: { [key === 'autoSkipEnable' ? 'autoSkipEnabled' : key]: value } });
         });
-    } else {
-        chrome.storage.local.set(data);
-    }
+    });
 }
 
 ['introTime', 'outroTime', 'manualSkipTime', 'minDuration'].forEach(id => {
     document.getElementById(id).addEventListener('input', () => {
-        autoSaveSettings(id, parseInt(document.getElementById(id).value) || 0);
+        const input = document.getElementById(id);
+        if (input.value === '') return;
+        const number = Number(input.value);
+        if (!Number.isFinite(number)) return;
+        const value = Math.max(id === 'manualSkipTime' ? 1 : 0, Math.floor(number));
+        input.value = value;
+        autoSaveSettings(id, value);
     });
 });
-
-setupKeyRecorder('keyForward', (keyData) => {
-    tempKeyForward = keyData;
-    autoSaveSettings('keyForward', keyData);
-});
-setupKeyRecorder('keyRewind', (keyData) => {
-    tempKeyRewind = keyData;
-    autoSaveSettings('keyRewind', keyData);
-});
-
-const switches = ['autoSkipEnable', 'enableIntro', 'enableOutro', 'autoRestart', 'autoPlayNext'];
-switches.forEach(id => {
-    document.getElementById(id).addEventListener('change', (e) => {
-        let data = {}; data[id] = e.target.checked;
-
-        if (id === 'autoSkipEnable') {
-            updateStatusText(e.target.checked);
-
-            chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
-                if (tabs.length === 0) return;
-                chrome.tabs.sendMessage(tabs[0].id, { action: "getNiceTitle" }, { frameId: 0 }, (res) => {
-                    // 保存到当前匹配的收藏
-                    if (res && res.series && currentFavorites[res.series]) {
-                        currentFavorites[res.series].autoSkipEnabled = e.target.checked;
-                        data.favorites = currentFavorites;
-                    }
-
-                    if (res && res.site && res.site !== 'Web') {
-                        const currentSite = res.site;
-                        chrome.storage.local.get({ manualEnableSites: [] }, (items) => {
-                            let manualList = items.manualEnableSites || [];
-
-                            if (e.target.checked) {
-                                if (!manualList.includes(currentSite)) {
-                                    manualList.push(currentSite);
-                                }
-                            } else {
-                                manualList = manualList.filter(s => s !== currentSite);
-                            }
-
-                            chrome.storage.local.set({ manualEnableSites: manualList, ...data });
-                        });
-                    } else {
-                        chrome.storage.local.set(data);
-                    }
-                });
-            });
-        } else {
-            chrome.storage.local.set(data);
-        }
+setupKeyRecorder('keyForward', key => { tempKeyForward = key; autoSaveSettings('keyForward', key); });
+setupKeyRecorder('keyRewind', key => { tempKeyRewind = key; autoSaveSettings('keyRewind', key); });
+['autoSkipEnable', 'enableIntro', 'enableOutro', 'autoRestart', 'autoPlayNext'].forEach(id => {
+    document.getElementById(id).addEventListener('change', event => {
+        if (id === 'autoSkipEnable') updateStatusText(event.target.checked);
+        autoSaveSettings(id, event.target.checked);
     });
 });
 
@@ -742,7 +798,7 @@ function setupTagSettings(savedRules) {
             div.style.borderBottom = '1px solid #eee';
             div.innerHTML = `
                 <span style="font-size:11px; color:#333;">
-                    <span style="color:#00aeec;">[${rule.match}]</span> ➔ <b>${rule.name}</b>
+                    <span style="color:#00aeec;">[${SkipperCore.escapeHtml(rule.match)}]</span> ➔ <b>${SkipperCore.escapeHtml(rule.name)}</b>
                 </span>
                 <button class="btn-del-rule" data-idx="${index}" style="border:none; background:none; color:red; cursor:pointer;">×</button>
             `;

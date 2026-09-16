@@ -12,7 +12,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // 绑定事件
     document.getElementById('btnAddRule').addEventListener('click', addRule);
     document.getElementById('btnAddSeriesRule').addEventListener('click', addSeriesRule);
-    document.getElementById('btnSaveSettings').addEventListener('click', saveSettings);
+    document.getElementById('chkOnlySaveMaxEpisode').addEventListener('change', saveSettings);
+    document.getElementById('chkWhitelistMode').addEventListener('change', saveSettings);
+    chrome.storage.onChanged.addListener((changes, area) => {
+        if (area === 'local' && (changes.favorites || changes.favFolders)) loadFavorites();
+    });
 
     // 收藏管理事件
     document.getElementById('favSearchInput').addEventListener('input', filterFavorites);
@@ -218,9 +222,11 @@ function deleteSeriesRule(index) {
 
 // --- 收藏管理逻辑 ---
 let cachedFavorites = {};
+let cachedFolders = [];
 
 function loadFavorites() {
-    chrome.storage.local.get({ favorites: {} }, (items) => {
+    chrome.storage.local.get({ favorites: {}, favFolders: [] }, (items) => {
+        cachedFolders = items.favFolders;
         cachedFavorites = items.favorites || {};
         updateFolderFilter(cachedFavorites);
         renderFavoritesList(cachedFavorites);
@@ -228,7 +234,7 @@ function loadFavorites() {
 }
 
 function updateFolderFilter(favoritesObj) {
-    const folders = new Set();
+    const folders = new Set(cachedFolders);
     Object.values(favoritesObj).forEach(item => {
         if (item.folder && item.folder.trim() !== "") {
             folders.add(item.folder.trim());
@@ -269,7 +275,7 @@ function renderFavoritesList(favoritesObj) {
     const folderFilter = document.getElementById('folderFilter').value;
 
     // 转换为数组
-    let list = Object.values(favoritesObj);
+    let list = Object.values(favoritesObj).filter(item => item && typeof item.series === 'string' && SkipperCore.validUrl(item.url));
 
     // 过滤逻辑
     list = list.filter(item => {
@@ -356,7 +362,7 @@ function moveFavorite(seriesName) {
     select.innerHTML = '<option value="">(移出文件夹 / 无)</option>';
     
     // 获取所有现有文件夹
-    const folders = new Set();
+    const folders = new Set(cachedFolders);
     Object.values(cachedFavorites).forEach(i => {
         if (i.folder && i.folder.trim() !== "") {
             folders.add(i.folder.trim());
@@ -389,161 +395,72 @@ function closeMoveModal() {
     currentMoveSeries = null;
 }
 
+function runFavoriteMutation(operation, message, onSaved) {
+    SkipperCore.mutate(operation, (data, error) => {
+        if (error) { showToast(error, true); return; }
+        cachedFavorites = data.favorites;
+        cachedFolders = data.favFolders;
+        updateFolderFilter(cachedFavorites);
+        renderFavoritesList(cachedFavorites);
+        if (message) showToast(message);
+        onSaved?.();
+    });
+}
+
 function confirmMove() {
     if (!currentMoveSeries) return;
-
-    const select = document.getElementById('moveFolderSelect');
-    const input = document.getElementById('moveNewFolderInput');
-    
-    let targetFolder = "";
-    
-    // 优先使用输入框的新建文件夹名
-    if (input.value && input.value.trim() !== "") {
-        targetFolder = input.value.trim();
-    } else {
-        targetFolder = select.value;
-    }
-
-    chrome.storage.local.get({ favorites: {} }, (items) => {
-        const favs = items.favorites;
-        if (favs[currentMoveSeries]) {
-            favs[currentMoveSeries].folder = targetFolder;
-            chrome.storage.local.set({ favorites: favs }, () => {
-                cachedFavorites = favs;
-                updateFolderFilter(cachedFavorites);
-                renderFavoritesList(cachedFavorites);
-                showToast('移动成功');
-                closeMoveModal();
-            });
-        }
-    });
+    const folder = document.getElementById('moveNewFolderInput').value.trim() || document.getElementById('moveFolderSelect').value || '默认收藏';
+    runFavoriteMutation({ type: 'move', key: currentMoveSeries, id: cachedFavorites[currentMoveSeries]?.id, folder }, '移动成功', closeMoveModal);
 }
 
 function deleteFavorite(seriesName) {
-    if (!confirm(`确定要删除 "${seriesName}" 的进度记录吗？`)) return;
-
-    chrome.storage.local.get({ favorites: {} }, (items) => {
-        const favs = items.favorites;
-        if (favs[seriesName]) {
-            delete favs[seriesName];
-            chrome.storage.local.set({ favorites: favs }, () => {
-                cachedFavorites = favs; // 更新缓存
-                // 如果正在搜索，重新过滤；否则重新渲染全部
-                const keyword = document.getElementById('favSearchInput').value.trim();
-                if (keyword) {
-                    filterFavorites();
-                } else {
-                    renderFavoritesList(favs);
-                }
-                showToast('已删除');
-            });
-        }
-    });
+    if (confirm(`确定要删除 "${seriesName}" 的进度记录吗？`)) {
+        runFavoriteMutation({ type: 'delete', key: seriesName, id: cachedFavorites[seriesName]?.id }, '已删除');
+    }
 }
 
 function clearAllFavorites() {
-    if (!confirm('确定要清空所有收藏记录吗？此操作不可恢复！')) return;
-
-    chrome.storage.local.set({ favorites: {} }, () => {
-        cachedFavorites = {};
-        renderFavoritesList({});
-        showToast('所有记录已清空');
-    });
+    if (confirm('确定要清空所有收藏记录吗？此操作不可恢复！')) runFavoriteMutation({ type: 'clear' }, '所有记录已清空');
 }
 
 function exportFavorites() {
-    chrome.storage.local.get({ favorites: {} }, (items) => {
-        const data = JSON.stringify(items.favorites, null, 2);
-        const blob = new Blob([data], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `bilibili-skipper-backup-${new Date().toISOString().split('T')[0]}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
+    chrome.storage.local.get({ favorites: {}, favFolders: [] }, items => {
+        try {
+            const data = SkipperCore.makeBackup(items.favorites, items.favFolders);
+            const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `skipper-backup-${new Date().toISOString().split('T')[0]}.json`;
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch (error) { showToast(error.message, true); }
     });
 }
 
 function importFavorites(event) {
     const file = event.target.files[0];
     if (!file) return;
-
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = e => {
         try {
-            const imported = JSON.parse(e.target.result);
-            if (typeof imported !== 'object') throw new Error('格式错误');
-
-            chrome.storage.local.get({ favorites: {} }, (items) => {
-                const current = items.favorites;
-                // 合并逻辑：如果存在同名 key，保留时间较新的
-                let count = 0;
-                for (const key in imported) {
-                    const newItem = imported[key];
-                    if (!current[key] || (newItem.timestamp || 0) > (current[key].timestamp || 0)) {
-                        current[key] = newItem;
-                        count++;
-                    }
-                }
-                
-                chrome.storage.local.set({ favorites: current }, () => {
-                    cachedFavorites = current;
-                    renderFavoritesList(current);
-                    showToast(`成功导入 ${count} 条记录`);
-                });
-            });
-        } catch (err) {
-            alert('导入失败：文件格式不正确');
-        }
-        // 清空 input 允许重复导入同一文件
+            const data = JSON.parse(e.target.result);
+            const parsed = SkipperCore.parseBackup(data);
+            const count = Object.keys(parsed.favorites).length;
+            if (confirm(`导入 ${count} 部番剧？同名记录保留更新时间较新的进度。`)) {
+                runFavoriteMutation({ type: 'import', data }, `成功导入 ${count} 条记录`);
+            }
+        } catch (error) { showToast(`导入失败：${error.message}`, true); }
         event.target.value = '';
     };
+    reader.onerror = () => { showToast('读取备份失败', true); event.target.value = ''; };
     reader.readAsText(file);
 }
 
 function renameFavorite(oldName) {
-    const newName = prompt("请输入新的番剧名称：", oldName);
-    if (!newName || newName.trim() === "" || newName === oldName) return;
-
-    const finalName = newName.trim();
-
-    chrome.storage.local.get({ favorites: {} }, (items) => {
-        const favs = items.favorites;
-        if (!favs[oldName]) return; // 原记录不存在
-
-        const oldData = favs[oldName];
-        
-        // 检查目标名称是否已存在
-        if (favs[finalName]) {
-            if (!confirm(`目标名称 "${finalName}" 已存在，是否合并？\n(将保留两者中较新的进度)`)) return;
-            
-            // 合并逻辑
-            const targetData = favs[finalName];
-            // 如果旧数据的 timestamp 更大（更新），则覆盖目标
-            // 否则保留目标，直接删除旧数据即可
-            if ((oldData.timestamp || 0) > (targetData.timestamp || 0)) {
-                favs[finalName] = { ...oldData, series: finalName };
-            }
-        } else {
-            // 直接重命名
-            favs[finalName] = { ...oldData, series: finalName };
-        }
-
-        // 删除旧名称
-        delete favs[oldName];
-
-        chrome.storage.local.set({ favorites: favs }, () => {
-            cachedFavorites = favs;
-            // 如果正在搜索，重新过滤；否则重新渲染全部
-            const keyword = document.getElementById('favSearchInput').value.trim();
-            if (keyword) {
-                filterFavorites();
-            } else {
-                renderFavoritesList(favs);
-            }
-            showToast('改名/合并成功');
-        });
-    });
+    const name = prompt('请输入新的番剧名称：', oldName)?.trim();
+    if (!name || name === oldName) return;
+    if (cachedFavorites[name] && !confirm('目标名称已存在，是否合并？将保留较新的进度和原有匹配名称。')) return;
+    runFavoriteMutation({ type: 'rename', key: oldName, id: cachedFavorites[oldName]?.id, name }, '改名/合并成功');
 }
 
 function formatTime(seconds) {
@@ -571,7 +488,8 @@ function saveSettings() {
     const onlySaveMaxEpisode = document.getElementById('chkOnlySaveMaxEpisode').checked;
     const whitelistMode = document.getElementById('chkWhitelistMode').checked;
     chrome.storage.local.set({ onlySaveMaxEpisode, whitelistMode }, () => {
-        showToast('设置已保存');
+        if (chrome.runtime.lastError) showToast(chrome.runtime.lastError.message, true);
+        else showToast('设置已保存');
     });
 }
 
@@ -587,7 +505,7 @@ function showToast(msg, isError = false) {
 
 function escapeHtml(text) {
     if (!text) return text;
-    return text
+    return String(text)
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")

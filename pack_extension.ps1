@@ -1,17 +1,24 @@
-# Output filename
-$zipFile = "Video-skipping-and-anime-TV-series-tracking-assistant-v3.0.zip"
+# Run relative to the script, including when launched from another folder.
+$ErrorActionPreference = 'Stop'
+Set-Location -LiteralPath $PSScriptRoot
+$manifest = Get-Content -Raw -LiteralPath 'manifest.json' | ConvertFrom-Json
+$zipFile = Join-Path $PSScriptRoot "Video-skipping-and-anime-TV-series-tracking-assistant-v$($manifest.version).zip"
 
 # Files to include
 $filesToZip = @(
     "manifest.json",
     "background.js",
+    "tracker-core.js",
     "content.js",
     "popup.html",
     "popup.js",
     "options.html",
     "options.js",
     "icon.png",
-    "README.md"
+    "README.md",
+    "PRIVACY.md",
+    "_locales",
+    "releases"
 )
 
 # Check if files exist
@@ -24,7 +31,7 @@ foreach ($file in $filesToZip) {
 
 # Remove old zip if exists
 if (Test-Path $zipFile) {
-    Remove-Item $zipFile
+    Remove-Item -LiteralPath $zipFile
 }
 
 # Create zip file
