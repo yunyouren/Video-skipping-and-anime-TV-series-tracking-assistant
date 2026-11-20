@@ -81,9 +81,12 @@ def main():
         deadline = time.monotonic() + 240
         while time.monotonic() < deadline:
             status, _, body = request(url)
-            if status != 200:
+            if status not in {200, 202}:
                 raise RuntimeError(f'{label} status check returned HTTP {status}.')
-            result = json.loads(body)
+            result = json.loads(body) if body.strip() else {}
+            if status == 202 and not result.get('status'):
+                time.sleep(5)
+                continue
             if result.get('status') == 'Succeeded':
                 print(redact(f'{label} succeeded. {result.get("message") or ""}'), flush=True)
                 return
