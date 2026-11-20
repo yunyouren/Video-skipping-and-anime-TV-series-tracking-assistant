@@ -8,6 +8,24 @@ if (window.hasBiliSkipperLoaded) {
     throw new Error("脚本已运行，跳过重复加载");
 }
 window.hasBiliSkipperLoaded = true;
+const pageObservers = new Set();
+SkipperCore.onInvalidated(() => {
+    for (const observer of pageObservers) observer.disconnect?.();
+    pageObservers.clear();
+    window.removeEventListener?.('keydown', onKeyHandler, true);
+    if (window.self === window.top) showRefreshNotice();
+});
+function showRefreshNotice() {
+    if (document.getElementById('skipper-refresh-notice')) return;
+    const notice = document.createElement('div'); notice.id = 'skipper-refresh-notice';
+    notice.style.cssText = 'position:fixed;bottom:20px;left:20px;z-index:2147483647;padding:10px 12px;border:1px solid #dce7ed;border-radius:8px;background:#fff;color:#40515e;font:12px/1.5 sans-serif;box-shadow:0 2px 12px #0002;display:flex;gap:10px;align-items:center;';
+    const text = document.createElement('span'); text.textContent = '扩展已更新，刷新后恢复进度记录';
+    const button = document.createElement('button'); button.textContent = '刷新页面';
+    button.style.cssText = 'border:0;border-radius:4px;padding:4px 8px;background:#00aeec;color:white;cursor:pointer;';
+    button.addEventListener('click', () => window.location.reload());
+    notice.appendChild(text); notice.appendChild(button);
+    (document.body || document.documentElement).appendChild(notice);
+}
 
 // 【新增】快速退出机制
 // 如果当前 iframe 尺寸太小（可能是广告或统计代码），直接不运行脚本
@@ -58,7 +76,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const found = SkipperCore.findFavorite(config.favorites, info.seriesName, null, info);
         sendResponse({ series: found ? found[0] : info.seriesName, sourceSeries: info.seriesName,
             episode: info.episodeName, url: window.location.href, site: info.siteName,
-            collectionId: info.collectionId, collectionUrl: info.collectionUrl });
+            collectionId: info.collectionId, collectionUrl: info.collectionUrl, pending: info.pending === true,
+            scriptVersion: SkipperCore.scriptVersion, contextActive: SkipperCore.contextValid() });
         return false;
     }
     if (request.action === 'getRequestVideoInfo') {
@@ -82,6 +101,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 // --- 初始化 ---
 chrome.storage.local.get(config, (items) => {
+    if (!SkipperCore.contextValid()) return;
     config = { ...config, ...items };
     if (!config.keyForward || !config.keyForward.code) config.keyForward = { code: 'ArrowRight', shift: true, ctrl: false, alt: false };
     if (!config.keyRewind || !config.keyRewind.code) config.keyRewind = { code: 'ArrowLeft', shift: true, ctrl: false, alt: false };
@@ -97,6 +117,7 @@ chrome.storage.local.get(config, (items) => {
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
+    if (!SkipperCore.contextValid()) return;
     if (area !== 'local') return;
     for (let key in changes) {
         if (config.hasOwnProperty(key)) {
@@ -136,6 +157,14 @@ function isKeyMatch(event, keyConfig) {
 }
 
 function tryClickNext() {
+    if (!SkipperCore.contextValid()) return false;
+    const parts = getBiliParts();
+    if (parts) {
+        const next = parts.entries[parts.part];
+        if (!parts.ready || !next?.node) return false;
+        next.node.click();
+        return true;
+    }
     const collection = getBiliCollection();
     if (collection) {
         const current = SkipperCore.episodeNumber(collection.episodeName);
@@ -162,6 +191,7 @@ function tryClickNext() {
 }
 
 function onKeyHandler(event) {
+    if (!SkipperCore.contextValid()) return;
     if (event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
     const isForward = isKeyMatch(event, config.keyForward);
     const isRewind = isKeyMatch(event, config.keyRewind);
@@ -336,6 +366,35 @@ let topInfoPending = false;
 let topInfoCallbacks = [];
 
 // --- 站点策略 ---
+function getBiliParts() {
+    const url = new URL(window.location.href);
+    const bv = /\/video\/(BV[a-zA-Z0-9]+)/.exec(url.pathname)?.[1];
+    if (!/(^|\.)bilibili\.com$/.test(url.hostname) || !bv) return null;
+    const h1 = document.querySelector('.video-title') || document.querySelector('h1');
+    const title = (h1?.getAttribute('title') || h1?.textContent || '').trim();
+    if (!title) return null;
+    // Scope to the active BV: a category collection can contain hundreds of other parts.
+    const head = document.querySelector('.video-pod .simple-base-item.active.head');
+    const group = head?.closest('.multi-p');
+    const legacy = document.querySelector('#multi_page');
+    const nodes = group ? [...group.querySelectorAll('.page-item')]
+        : legacy ? [...legacy.querySelectorAll('.list-box li, .cur-list li')] : [];
+    const part = Number(url.searchParams.get('p') || 1);
+    if (nodes.length < 2 && part <= 1 && !group) return null;
+    const entries = nodes.map((node, index) => {
+        const label = node.querySelector('.title') || node.querySelector('.part');
+        const text = (label?.getAttribute('title') || label?.textContent || '').trim() || `P${index + 1}`;
+        const target = new URL(`https://www.bilibili.com/video/${bv}/`); target.searchParams.set('p', String(index + 1));
+        return { node, title: text, number: SkipperCore.episodeNumber(text) ?? index + 1, part: index + 1, url: target.href };
+    });
+    const current = entries[part - 1];
+    const active = group?.querySelector('.page-item.active') || legacy?.querySelector('.list-box .on, .cur-list .on');
+    const activeIndex = active ? nodes.indexOf(active) + 1 : part;
+    const ready = !!current && activeIndex === part && (!head || (head.querySelector('.title')?.getAttribute('title') || '').trim() === title);
+    const episodeName = current ? (/^\d+$/.test(current.title) ? `第${Number(current.title)}集` : current.title) : `P${part}`;
+    return { seriesName: title, episodeName, part, entries, ready,
+        collectionId: `bilibili:video:${bv}`, collectionUrl: `https://www.bilibili.com/video/${bv}/`, url: url.href };
+}
 function getBiliCollection() {
     if (!/(^|\.)bilibili\.com$/.test(new URL(window.location.href).hostname)) return null;
     const link = document.querySelector('.video-pod__header a[href*="collectiondetail?"]');
@@ -347,16 +406,20 @@ function getBiliCollection() {
     const h1 = document.querySelector('h1');
     if (!root || !h1) return null;
     const title = h1.getAttribute('title') || h1.textContent || '';
-    const episode = title.match(/第\s*\d+\s*[集话]/)?.[0] || '观看中';
+    const episode = title.match(/第\s*\d+\s*[集话]/)?.[0];
+    // A category collection (e.g. 美漫) is not a series identity.
+    if (!episode) return null;
     return { root, seriesName: (link.textContent || '').trim(), episodeName: episode,
         collectionId: `bilibili:collection:${sid}`, collectionUrl: `${url.origin}${url.pathname}?sid=${sid}`,
         url: window.location.href };
 }
 function syncCatalog(info, found) {
     if (!found || !info.collectionId) return;
+    const parts = getBiliParts();
     const collection = getBiliCollection();
-    if (!collection) return;
-    const episodes = [...collection.root.querySelectorAll('.simple-base-item .title')].map(el => {
+    if (!parts && !collection) return;
+    if (parts && !parts.ready) return;
+    const episodes = parts ? parts.entries.map(({ node, ...entry }) => entry) : [...collection.root.querySelectorAll('.simple-base-item .title')].map(el => {
         const title = el.getAttribute('title') || el.textContent || '';
         return { title, number: SkipperCore.episodeNumber(title) };
     }).filter(e => e.number !== null);
@@ -398,6 +461,8 @@ const SITE_STRATEGIES = [
         name: 'B站',
         // 【新增】自定义解析器：直接读 DOM，不依赖标题正则
         parser: () => {
+            const parts = getBiliParts();
+            if (parts) { const { entries, ready, ...info } = parts; return { ...info, pending: !ready }; }
             const collection = getBiliCollection();
             if (collection) { const { root, ...info } = collection; return info; }
             // 1. 锁定"系列名称" (Series):
@@ -497,9 +562,9 @@ function refreshTopInfo(callback) {
     if (topInfoPending) return;
     topInfoPending = true;
     topInfoRequestedAt = Date.now();
-    chrome.runtime.sendMessage({ action: 'getPageInfo' }, response => {
+    SkipperCore.sendMessage({ action: 'getPageInfo' }, (response, error) => {
         topInfoPending = false;
-        if (!chrome.runtime.lastError && response?.url) {
+        if (!error && response?.url) {
             cachedTopTitle = response.title || null;
             cachedTopUrl = response.url;
             cachedTopInfo = response.info ? { seriesName: response.info.sourceSeries || response.info.series,
@@ -509,7 +574,7 @@ function refreshTopInfo(callback) {
         }
         const callbacks = topInfoCallbacks;
         topInfoCallbacks = [];
-        callbacks.forEach(cb => cb());
+        if (SkipperCore.contextValid()) callbacks.forEach(cb => cb());
     });
 }
 
@@ -523,16 +588,20 @@ function startMonitoring() {
     const observedRoots = new WeakSet();
     let scheduled = false;
     const scan = (root = document) => {
+        if (!SkipperCore.contextValid()) return;
         root.querySelectorAll('video').forEach(attachVideoListener);
         root.querySelectorAll('*').forEach(node => { if (node.shadowRoot) scan(node.shadowRoot); });
         const target = root === document ? document.body || document.documentElement : root;
         if (!observedRoots.has(target)) {
             observedRoots.add(target);
-            new MutationObserver(() => {
+            const observer = new MutationObserver(() => {
+                if (!SkipperCore.contextValid()) return;
                 if (scheduled) return;
                 scheduled = true;
                 setTimeout(() => { scheduled = false; scan(); }, 1000);
-            }).observe(target, { childList: true, subtree: true });
+            });
+            pageObservers.add(observer);
+            observer.observe(target, { childList: true, subtree: true });
         }
     };
     if (window.self !== window.top) refreshTopInfo();
@@ -548,6 +617,7 @@ function attachVideoListener(video) {
     processedVideos.add(video);
     playbackStates.set(video, freshState());
     const reset = () => {
+        if (!SkipperCore.contextValid()) return;
         playbackStates.set(video, freshState());
         if (window.self !== window.top) { isTopInfoReady = false; refreshTopInfo(); }
     };
@@ -557,6 +627,7 @@ function attachVideoListener(video) {
     video.addEventListener('ended', () => handleEnded(video));
     video.addEventListener('pause', () => autoUpdateFavorites(video, true));
     video.addEventListener('seeking', () => {
+        if (!SkipperCore.contextValid()) return;
         const state = playbackStates.get(video);
         if (!state.restoring && !state.resumed) state.userSeeking = true;
         if (video.currentTime < 1) state.skippedIntro = false;
@@ -582,6 +653,7 @@ function getPlaybackContext(video) {
 
 function restoreProgress(video, context) {
     const { info, url, settings, state } = context;
+    if (info.pending) return false;
     const item = context.item?.episodeProgress?.[SkipperCore.canonicalUrl(url)] || context.item;
     if (state.restoring) {
         if (video.seeking || Math.abs(video.currentTime - state.restoreTarget) > 2) return false;
@@ -617,22 +689,24 @@ function restoreProgress(video, context) {
 }
 
 function autoUpdateFavorites(video, force = false) {
+    if (!SkipperCore.contextValid()) return;
     if (pendingEpisodeSelection()) return;
     if (!config.autoUpdateFav || !isTopInfoReady || video !== findMainVideo()) return;
     if (!Number.isFinite(video.duration) || video.duration <= 0 || !Number.isFinite(video.currentTime)) return;
     const { info, found, url, state } = getPlaybackContext(video);
-    if (!found || !state.resumed || state.restoring || video.seeking) return;
+    if (info.pending || !found || !state.resumed || state.restoring || video.seeking) return;
     if (!force && Date.now() - state.lastSavedAt < 2000) return;
     if (!force && state.lastSavedTime === Math.floor(video.currentTime)) return;
     state.lastSavedAt = Date.now();
     state.lastSavedTime = Math.floor(video.currentTime);
     saveStatus = { state: '保存中', time: saveStatus.time, error: null };
     SkipperCore.mutate({ type: 'progress', key: found[0], id: found[1].id,
+        flushSync: force,
         episode: info.episodeName, site: info.siteName, url, time: video.currentTime,
         collectionId: info.collectionId, collectionUrl: info.collectionUrl,
         duration: video.duration, timestamp: Date.now() }, (data, error) => {
         saveStatus = { state: error ? '保存失败' : '已保存', time: error ? saveStatus.time : Date.now(), error: error || null };
-        if (error) { state.lastSavedAt = 0; state.lastSavedTime = null; console.error('Skipper:', error); }
+        if (error) { state.lastSavedAt = 0; state.lastSavedTime = null; if (SkipperCore.contextValid()) console.error('Skipper:', error); }
     });
 }
 
@@ -640,8 +714,9 @@ function attemptNext(video, state, callback) {
     state.nextAttempted = true;
     if (tryClickNext()) { state.switching = true; callback(true); return; }
     if (window.self !== window.top) {
-        chrome.runtime.sendMessage({ action: 'clickNextInTop' }, response => {
-            const clicked = !chrome.runtime.lastError && !!response?.clicked;
+        SkipperCore.sendMessage({ action: 'clickNextInTop' }, (response, error) => {
+            if (!SkipperCore.contextValid()) return;
+            const clicked = !error && !!response?.clicked;
             state.switching = clicked;
             callback(clicked);
         });
@@ -661,9 +736,12 @@ function restartVideo(video, settings, state) {
 }
 
 function handleEnded(video) {
+    if (!SkipperCore.contextValid()) return;
     if (pendingEpisodeSelection()) return;
     if (video !== findMainVideo() || !isTopInfoReady) return;
     const { settings, state } = getPlaybackContext(video);
+    if (!SkipperCore.contextValid()) return;
+    if (getCachedVideoInfo().pending) return;
     autoUpdateFavorites(video, true);
     if (!settings.enabled || !Number.isFinite(video.duration) || video.duration < settings.minDuration || state.switching || state.handledEnd) return;
     state.handledEnd = true;
@@ -677,17 +755,20 @@ function handleEnded(video) {
 }
 
 function handleTimeUpdate(e) {
+    if (!SkipperCore.contextValid()) return;
     if (pendingEpisodeSelection()) return;
     const video = e.target;
     if (video !== findMainVideo() || !Number.isFinite(video.duration) || video.duration <= 0) return;
     if (window.self !== window.top && Date.now() - topInfoRequestedAt > 3000) refreshTopInfo();
     if (!isTopInfoReady) return;
     const context = getPlaybackContext(video);
+    if (!SkipperCore.contextValid()) return;
     const { settings, state } = context;
     if (Date.now() - state.checkedAt < 500) return;
     state.checkedAt = Date.now();
     if (!restoreProgress(video, context)) return;
     autoUpdateFavorites(video);
+    if (!SkipperCore.contextValid()) return;
     if (!settings.enabled || video.duration < settings.minDuration || state.switching || video.seeking) return;
     const outroStart = video.duration - (settings.enableOutro ? settings.outroTime : 0);
     if (settings.enableIntro && settings.introTime < outroStart && !state.skippedIntro && video.currentTime > 0.5 && video.currentTime < settings.introTime) {
@@ -698,6 +779,7 @@ function handleTimeUpdate(e) {
     if (settings.enableOutro && settings.outroTime > 0 && outroStart > 0 && video.currentTime >= outroStart && video.currentTime < video.duration && Date.now() >= state.cooldown && !state.finishing) {
         state.finishing = true;
         const finish = clicked => {
+            if (!SkipperCore.contextValid()) return;
             if (playbackStates.get(video) !== state) return;
             if (clicked) showToast('🚀 正在切集...');
             else { video.currentTime = video.duration; showToast('🚀 跳过片尾'); }
@@ -746,7 +828,7 @@ function showWhitelistNotification() {
         });
 
         document.getElementById('bili-notice-settings').addEventListener('click', () => {
-            chrome.runtime.sendMessage({ action: 'openOptionsPage' });
+            SkipperCore.sendMessage({ action: 'openOptionsPage' });
             notice.style.opacity = '0';
             notice.style.transition = 'opacity 0.3s';
             setTimeout(() => notice.remove(), 300);

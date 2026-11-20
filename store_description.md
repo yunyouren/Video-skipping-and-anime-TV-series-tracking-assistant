@@ -45,7 +45,7 @@
 哔哩哔哩（B站合集/列表深度优化）、爱奇艺、腾讯视频、优酷、芒果TV、YouTube、樱花动漫 等
 
 ##### 隐私声明
-所有数据仅存储在浏览器本地，**绝不上传**任何服务器。权限仅用于视频控制和标题解析。
+观看数据保存在浏览器本地。启用可选的浏览器账号同步后，收藏、已看标记和最近续看位置等通过浏览器内置服务在设备间同步。
 
 ---
 
@@ -82,7 +82,7 @@
 Bilibili (deep integration with collections/playlists), iQIYI, Tencent Video, Youku, MGTV, YouTube, Yinghua CD, and more
 
 ##### Privacy
-All data is stored locally in your browser. **Nothing is ever uploaded** to any server. Permissions are strictly for video control and title parsing.
+Viewing data is stored locally in your browser. When you enable optional browser account sync, the browser's built-in sync service carries your favorites, watched status, and latest resume positions across devices.
 
 ---
 

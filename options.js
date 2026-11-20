@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadSeriesRules();
     loadSettings();
     loadFavorites();
+    loadBrowserSyncSettings();
 
     // 绑定事件
     document.getElementById('btnAddRule').addEventListener('click', addRule);
@@ -16,11 +17,20 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('chkWhitelistMode').addEventListener('change', saveSettings);
     chrome.storage.onChanged.addListener((changes, area) => {
         if (area === 'local' && (changes.favorites || changes.favFolders)) loadFavorites();
+        if (area === 'local' && (changes.browserSyncEnabled || changes.browserSyncStatus)) loadBrowserSyncSettings();
     });
+    document.getElementById('browserSyncEnabled').addEventListener('change', e => applyBrowserSync({ action: 'setBrowserSync', enabled: e.target.checked }));
+    document.getElementById('runBrowserSync').addEventListener('click', () => applyBrowserSync({ action: 'syncBrowserData' }));
 
     // 收藏管理事件
     document.getElementById('favSearchInput').addEventListener('input', filterFavorites);
     document.getElementById('folderFilter').addEventListener('change', filterFavorites);
+    document.getElementById('favoritesStatusFilter').value = 'active';
+    document.getElementById('favoritesStatusFilter').addEventListener('change', filterFavorites);
+    document.getElementById('favoritesSort').addEventListener('change', e => {
+        chrome.storage.local.set({ favoriteSortMode: e.target.value }); filterFavorites();
+    });
+    document.getElementById('refreshFavorites').addEventListener('click', filterFavorites);
     document.getElementById('btnClearAllFavs').addEventListener('click', clearAllFavorites);
     document.getElementById('btnExportFavs').addEventListener('click', exportFavorites);
     document.getElementById('btnImportFavs').addEventListener('click', () => document.getElementById('importFile').click());
@@ -223,13 +233,19 @@ function deleteSeriesRule(index) {
 // --- 收藏管理逻辑 ---
 let cachedFavorites = {};
 let cachedFolders = [];
+const openFavoriteDetails = new Set();
+let favoriteDefaults = {};
 
 function loadFavorites() {
-    chrome.storage.local.get({ favorites: {}, favFolders: [] }, (items) => {
+    chrome.storage.local.get({ favorites: {}, favFolders: [], favoriteSortMode: 'recent', introTime: 90, outroTime: 0,
+        minDuration: 300, enableIntro: true, enableOutro: true, autoRestart: false, autoPlayNext: false, whitelistMode: true }, (items) => {
+        favoriteDefaults = items;
+        document.getElementById('favoritesSort').value = items.favoriteSortMode;
         cachedFolders = items.favFolders;
         cachedFavorites = items.favorites || {};
         updateFolderFilter(cachedFavorites);
-        renderFavoritesList(cachedFavorites);
+        if (openFavoriteDetails.size) document.getElementById('favoritesSummary').textContent = '后台记录已更新。编辑内容保留，点“刷新列表”读取最新数据。';
+        else renderFavoritesList(cachedFavorites);
     });
 }
 
@@ -273,12 +289,14 @@ function renderFavoritesList(favoritesObj) {
     // 获取当前过滤条件
     const searchKeyword = document.getElementById('favSearchInput').value.trim().toLowerCase();
     const folderFilter = document.getElementById('folderFilter').value;
+    const statusFilter = document.getElementById('favoritesStatusFilter').value;
 
     // 转换为数组
     let list = Object.values(favoritesObj).filter(item => item && typeof item.series === 'string' && SkipperCore.validUrl(item.url));
 
     // 过滤逻辑
     list = list.filter(item => {
+        if (statusFilter === 'active' && item.seriesCompleted === true || statusFilter === 'completed' && item.seriesCompleted !== true) return false;
         // 搜索过滤
         if (searchKeyword && !item.series.toLowerCase().includes(searchKeyword)) {
             return false;
@@ -295,7 +313,10 @@ function renderFavoritesList(favoritesObj) {
     });
 
     // 排序 (按时间倒序)
-    list.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    list.sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || (a.pinned && b.pinned ? (a.pinnedAt || 0) - (b.pinnedAt || 0) : 0)
+        || (document.getElementById('favoritesSort').value === 'name' ? a.series.localeCompare(b.series, 'zh-CN') : Math.max(b.timestamp || 0, b.lastOpenedAt || 0) - Math.max(a.timestamp || 0, a.lastOpenedAt || 0)));
+    document.getElementById('favoritesSummary').textContent = `${list.length} 部符合筛选 · ${Object.values(favoritesObj).filter(i => i?.seriesCompleted).length} 部全集已看`;
+    for (const key of openFavoriteDetails) if (!list.some(item => (item.id || item.series) === key)) openFavoriteDetails.delete(key);
 
     if (list.length === 0) {
         container.innerHTML = '<div class="empty-tip">暂无符合条件的收藏记录。</div>';
@@ -314,7 +335,7 @@ function renderFavoritesList(favoritesObj) {
         const folderHtml = item.folder ? `<span style="background:#e6f7ff; color:#00aeec; padding:2px 5px; border-radius:3px; margin-right:5px; font-size:12px;">📁 ${escapeHtml(item.folder)}</span>` : '';
 
         const div = document.createElement('div');
-        div.className = 'rule-item';
+        div.className = 'rule-item favorite-card';
         div.style.flexDirection = 'column';
         div.style.alignItems = 'flex-start';
         
@@ -339,6 +360,7 @@ function renderFavoritesList(favoritesObj) {
                 <div>${dateStr}</div>
             </div>
         `;
+        addFavoriteTools(div, item);
         container.appendChild(div);
     });
 
@@ -346,6 +368,106 @@ function renderFavoritesList(favoritesObj) {
     document.querySelectorAll('.btn-del-fav').forEach(btn => btn.addEventListener('click', (e) => deleteFavorite(e.target.dataset.series)));
     document.querySelectorAll('.btn-edit-fav').forEach(btn => btn.addEventListener('click', (e) => renameFavorite(e.target.dataset.series)));
     document.querySelectorAll('.btn-move-fav').forEach(btn => btn.addEventListener('click', (e) => moveFavorite(e.target.dataset.series)));
+}
+
+function uiElement(tag, className, text) {
+    const node = document.createElement(tag); if (className) node.className = className;
+    if (text !== undefined) node.textContent = text; return node;
+}
+function favoriteButton(parent, className, text, click) {
+    const button = uiElement('button', className, text); button.type = 'button'; button.addEventListener('click', click); parent.appendChild(button); return button;
+}
+function favoriteOperation(item, operation, message) {
+    runFavoriteMutation({ key: item.series, id: item.id, ...operation }, message);
+}
+function openFavoriteEpisode(item, url, time = 0) {
+    if (!SkipperCore.validUrl(url)) return;
+    runFavoriteMutation({ type: 'open', key: item.series, id: item.id }, '', () => chrome.tabs.create({ url: SkipperCore.resumeUrl(url, time) }));
+}
+function settingsEditor(item, url) {
+    const form = uiElement('div', 'settings-form');
+    form.appendChild(uiElement('div', '', url ? '当前这一集的跳过设置' : item.collectionId ? '整部作品默认设置' : '这条收藏的跳过设置'));
+    const fields = uiElement('div', 'settings-fields'), inputs = new Map();
+    const effective = SkipperCore.settings({ ...favoriteDefaults, whitelistMode: true }, item, url);
+    for (const [key, label, type] of [
+        ['autoSkipEnabled', '启用跳过', 'checkbox'], ['enableIntro', '跳过片头', 'checkbox'], ['introTime', '片头结束（秒）', 'number'],
+        ['enableOutro', '跳过片尾', 'checkbox'], ['outroTime', '距结尾（秒）', 'number'], ['minDuration', '短视频保护（秒）', 'number'],
+        ['autoPlayNext', '自动下一集', 'checkbox'], ['autoRestart', '完播重播', 'checkbox']]) {
+        const labelNode = uiElement('label', '', label), input = uiElement('input', `setting-${key}`); input.type = type;
+        input.setAttribute?.('aria-label', `${url ? '单集' : '作品'}${label}`);
+        if (type === 'checkbox') input.checked = key === 'autoSkipEnabled' ? effective.enabled : effective[key] === true;
+        else { input.min = '0'; input.step = '1'; input.value = effective[key] || 0; }
+        inputs.set(key, input); labelNode.appendChild(input); fields.appendChild(labelNode);
+    }
+    form.appendChild(fields);
+    favoriteButton(form, 'btn-save-settings btn-primary', '保存设置', () => {
+        const patch = {};
+        for (const [key, input] of inputs) {
+            const value = input.type === 'checkbox' ? input.checked : Number(input.value);
+            if (input.type === 'number' && (String(input.value).trim() === '' || !Number.isFinite(value) || value < 0)) { showToast('秒数必须是非负数字', true); return; }
+            patch[key] = value;
+        }
+        favoriteOperation(item, { type: 'patch', patch, episodeUrl: url }, '跳过设置已保存，与弹窗同步');
+    });
+    if (url) favoriteButton(form, 'btn-reset-episode', '恢复作品默认设置', () => favoriteOperation(item, { type: 'resetEpisodeSettings', url }, '该集恢复默认设置'));
+    return form;
+}
+function addFavoriteTools(card, item) {
+    const tools = uiElement('div', 'favorite-tools');
+    favoriteButton(tools, 'btn-resume-fav', '继续观看', () => openFavoriteEpisode(item, item.url, item.time));
+    favoriteButton(tools, 'btn-pin-fav', item.pinned ? '取消置顶' : '置顶', () => favoriteOperation(item, { type: 'pin', pinned: !item.pinned }, '置顶设置已保存'));
+    favoriteButton(tools, 'btn-watched-fav', SkipperCore.watchState(item, item) === '已看完' ? '本集设为未看' : '本集已看', () => favoriteOperation(item, { type: 'watched', url: item.url, watched: SkipperCore.watchState(item, item) !== '已看完' }, '单集状态已保存'));
+    favoriteButton(tools, 'btn-complete-fav', item.seriesCompleted ? '取消全集已看' : '全集已看', () => favoriteOperation(item, { type: 'completeSeries', completed: !item.seriesCompleted }, item.seriesCompleted ? '已恢复到未完列表' : '已隐藏，可选择“全集已看”查看'));
+    const folders = uiElement('select', 'quick-folder-fav'); folders.title = '选择后立即移动文件夹';
+    for (const folder of new Set(['默认收藏', ...cachedFolders, ...Object.values(cachedFavorites).map(i => i.folder).filter(Boolean)])) {
+        const option = uiElement('option', '', folder); option.value = folder; folders.appendChild(option);
+    }
+    folders.value = item.folder || '默认收藏';
+    folders.addEventListener('change', () => favoriteOperation(item, { type: 'move', folder: folders.value }, '文件夹已更新'));
+    tools.appendChild(folders);
+    const key = item.id || item.series;
+    favoriteButton(tools, 'btn-details-fav', openFavoriteDetails.has(key) ? '收起详情' : '选集与设置', () => {
+        if (openFavoriteDetails.has(key)) openFavoriteDetails.delete(key); else openFavoriteDetails.add(key);
+        filterFavorites();
+    });
+    card.appendChild(tools);
+    if (!openFavoriteDetails.has(key)) return;
+    const editor = uiElement('div', 'favorite-editor');
+    editor.appendChild(settingsEditor(item));
+    editor.appendChild(uiElement('p', 'desc', '进度按秒编辑。请先暂停对应视频；后台更新时会保留输入，点击刷新列表可重新读取。'));
+    const entries = SkipperCore.episodeEntries(item);
+    for (const entry of entries) {
+        const row = uiElement('div', 'episode-row');
+        row.dataset.url = entry.markUrl || '';
+        const heading = uiElement('div', 'episode-heading');
+        heading.appendChild(uiElement('strong', '', `${entry.label}${entry.part ? ` · P${entry.part}` : ''}`));
+        heading.appendChild(uiElement('span', 'episode-state', entry.state));
+        heading.title = entry.title; row.appendChild(heading);
+        const actions = uiElement('div', 'episode-tools');
+        favoriteButton(actions, 'btn-open-episode', '观看', () => openFavoriteEpisode(item, entry.openUrl, entry.record?.time || 0));
+        const mark = favoriteButton(actions, 'btn-mark-episode', entry.state === '已看完' ? '设为未看' : '标为已看', () => favoriteOperation(item, {
+            type: 'watched', url: entry.markUrl, number: entry.number, watched: entry.state !== '已看完' }, '已更新单集状态'));
+        mark.disabled = !SkipperCore.watchKey(entry.markUrl, entry.number);
+        if (entry.record?.duration > 0) {
+            const progress = uiElement('input', 'episode-edit-time'); progress.type = 'number'; progress.min = '0'; progress.max = entry.record.duration; progress.step = '1'; progress.value = entry.record.time;
+            progress.title = '已观看位置（秒）'; actions.appendChild(progress);
+            actions.appendChild(uiElement('span', '', `/ ${entry.record.duration} 秒`));
+            favoriteButton(actions, 'btn-save-progress', '保存进度', () => {
+                if (String(progress.value).trim() === '') { showToast('请填写播放秒数', true); return; }
+                favoriteOperation(item, { type: 'editProgress', url: entry.record.url, time: Number(progress.value), expectedTimestamp: entry.record.timestamp }, '进度已保存');
+            });
+        }
+        if (item.collectionId && SkipperCore.validUrl(entry.markUrl)) {
+            favoriteButton(actions, 'btn-episode-settings', '单集设置', () => {
+                const existing = row.querySelector('.episode-settings');
+                if (existing) { existing.remove(); return; }
+                const settings = settingsEditor(item, entry.markUrl); settings.className += ' episode-settings'; row.appendChild(settings);
+            });
+        }
+        row.appendChild(actions); editor.appendChild(row);
+    }
+    if (!item.catalog?.length) editor.appendChild(uiElement('p', 'desc', '仅显示已有记录。打开合集视频播放后会补充可识别目录。'));
+    card.appendChild(editor);
 }
 
 function filterFavorites() {
@@ -414,13 +536,13 @@ function confirmMove() {
 }
 
 function deleteFavorite(seriesName) {
-    if (confirm(`确定要删除 "${seriesName}" 的进度记录吗？`)) {
+    if (confirm(`确定要删除「${seriesName}」的进度记录吗？开启账号同步时，删除也会同步到其他电脑。`)) {
         runFavoriteMutation({ type: 'delete', key: seriesName, id: cachedFavorites[seriesName]?.id }, '已删除');
     }
 }
 
 function clearAllFavorites() {
-    if (confirm('确定要清空所有收藏记录吗？此操作不可恢复！')) runFavoriteMutation({ type: 'clear' }, '所有记录已清空');
+    if (confirm('确定要清空所有收藏记录吗？开启账号同步时，此操作也会影响其他电脑，且无法撤销。')) runFavoriteMutation({ type: 'clear' }, '所有记录已清空');
 }
 
 function exportFavorites() {
@@ -477,6 +599,29 @@ function formatTime(seconds) {
 }
 
 // --- 高级设置逻辑 ---
+function loadBrowserSyncSettings() {
+    chrome.storage.local.get({ browserSyncEnabled: false, browserSyncStatus: null }, items => {
+        const enabled = items.browserSyncEnabled === true;
+        document.getElementById('browserSyncEnabled').checked = enabled;
+        document.getElementById('runBrowserSync').disabled = !enabled;
+        const status = items.browserSyncStatus;
+        document.getElementById('browserSyncStatus').textContent = !enabled ? '已关闭' : status?.error || (status?.checkedAt
+            ? `浏览器同步存储已更新 · ${new Date(status.checkedAt).toLocaleString()}` : '等待浏览器同步');
+    });
+}
+
+function applyBrowserSync(message) {
+    const checkbox = document.getElementById('browserSyncEnabled');
+    checkbox.disabled = true;
+    document.getElementById('runBrowserSync').disabled = true;
+    document.getElementById('browserSyncStatus').textContent = '正在检查…';
+    SkipperCore.sendMessage(message, (response, error) => {
+        checkbox.disabled = false;
+        loadBrowserSyncSettings();
+        if (error || !response?.ok) showToast(error || response?.error || '同步设置保存失败', true);
+    });
+}
+
 function loadSettings() {
     chrome.storage.local.get({ onlySaveMaxEpisode: false, whitelistMode: true }, (items) => {
         document.getElementById('chkOnlySaveMaxEpisode').checked = items.onlySaveMaxEpisode;

@@ -1,0 +1,37 @@
+name: Submit update to Edge Add-ons
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to submit (must match manifest.json)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: edge-add-ons-publish
+  cancel-in-progress: false
+
+jobs:
+  submit:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Run regression tests and build package
+        run: |
+          node --test tests/*.test.cjs
+          python3 pack_extension.py
+      - name: Upload package and submit for certification
+        env:
+          EDGE_VERSION: ${{ inputs.version }}
+          EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
+          EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
+          EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
+        run: python3 .github/scripts/publish_edge.py

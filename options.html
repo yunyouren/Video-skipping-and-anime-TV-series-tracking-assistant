@@ -103,6 +103,22 @@
       box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 100;
     }
     #toast.show { opacity: 1; }
+    .favorite-filters,.favorite-tools { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:10px 0; }
+    .favorite-filters select,.favorite-tools select { padding:6px 8px; border:1px solid #e1e7ec; border-radius:5px; background:white; color:#52616c; }
+    .favorite-tools button { padding:5px 9px; background:#f1f7fa; color:#367089; font-size:12px; }
+    .favorite-tools { width:100%; }
+    .favorite-editor { width:100%; border-top:1px solid #e7edf1; margin-top:6px; padding-top:12px; }
+    .settings-fields { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+    .settings-fields label { font-size:12px; color:#63717c; display:flex; gap:4px; align-items:center; }
+    .settings-fields input[type=number],.episode-edit-time { width:70px; padding:5px; border:1px solid #dce4ea; border-radius:4px; }
+    .settings-form { border:1px solid #e7edf1; padding:10px; border-radius:6px; margin:8px 0; }
+    .settings-form button,.episode-tools button { padding:5px 8px; font-size:12px; }
+    .episode-row { border-top:1px solid #edf1f4; padding:10px 0; }
+    .episode-heading { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:13px; }
+    .episode-tools { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:6px; }
+    #favoritesSummary { font-size:12px; color:#7a8790; }
+    .favorite-card:hover { background:white; }
+    @media(max-width:800px) { .sidebar { width:170px; } .main-content { padding:18px; } .input-group { flex-wrap:wrap; } }
   </style>
 </head>
 <body>
@@ -193,6 +209,11 @@
             </div>
         </div>
 
+        <div class="favorite-filters">
+          <select id="favoritesStatusFilter" aria-label="观看状态筛选"><option value="active">未标记全集已看</option><option value="completed">全集已看</option><option value="all">全部状态</option></select>
+          <select id="favoritesSort" aria-label="收藏排序"><option value="recent">最近观看</option><option value="name">名称排序</option></select>
+          <button id="refreshFavorites">刷新列表</button><span id="favoritesSummary" role="status"></span>
+        </div>
         <div class="rule-list" id="favListContainer" style="max-height: 600px;">
           <!-- 列表渲染区 -->
         </div>
@@ -228,6 +249,15 @@
         </div>
         <p style="color:#666;font-size:12px;">修改后自动保存</p>
       </div>
+      <div class="card">
+        <h3>浏览器账号同步</h3>
+        <label><input id="browserSyncEnabled" type="checkbox"> 同步收藏和续看进度</label>
+        <p class="desc">在两台电脑上登录同一种浏览器的同一个账号，开启浏览器的扩展同步，安装同一商店条目的扩展，再分别开启这里的开关。收藏、文件夹、已看标记、置顶和作品跳过设置也会同步。</p>
+        <div class="favorite-filters">
+          <button id="runBrowserSync" type="button" disabled>立即检查</button>
+          <span id="browserSyncStatus" role="status">已关闭</span>
+        </div>
+      </div>
     </div>
 
 
@@ -246,7 +276,7 @@
       </div>
       <div class="card">
         <div class="desc">
-          Version 4.7 <br>
+          Version 4.11 <br>
           © 2026 Video Skipper
         </div>
       </div>

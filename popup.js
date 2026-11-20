@@ -16,12 +16,25 @@ let visibleCount = 20;
 let popupConfig = {};
 let currentPageInfo = null;
 let sortMode = 'recent';
+let showCompleted = false;
 let stableOrder = new Map();
 const expandedEpisodes = new Set();
 const PAGE_SIZE = 20;
 
 document.addEventListener('DOMContentLoaded', () => {
-    chrome.storage.local.get({ favoriteSortMode: 'recent' }, data => {
+    SkipperCore.sendMessage({ action: 'syncBrowserData' });
+    document.getElementById('reloadVideoPage').addEventListener('click', () => {
+        chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+            if (!tabs.length) return;
+            chrome.tabs.reload(tabs[0].id, {}, () => {
+                if (chrome.runtime.lastError) showFloatingToast('刷新失败，请手动刷新视频页');
+                else window.close?.();
+            });
+        });
+    });
+    chrome.storage.local.get({ favoriteSortMode: 'recent', showCompletedFavorites: false }, data => {
+        showCompleted = data.showCompletedFavorites === true;
+        document.getElementById('showCompleted').checked = showCompleted;
         sortMode = data.favoriteSortMode === 'name' ? 'name' : 'recent';
         document.getElementById('sortMode').value = sortMode;
         stableOrder.clear(); renderFavoritesList();
@@ -31,6 +44,10 @@ document.addEventListener('DOMContentLoaded', () => {
         chrome.storage.local.set({ favoriteSortMode: sortMode }); renderFavoritesList();
     });
     document.getElementById('refreshOrder').addEventListener('click', () => { stableOrder.clear(); renderFavoritesList(); });
+    document.getElementById('showCompleted').addEventListener('change', e => {
+        showCompleted = e.target.checked; visibleCount = PAGE_SIZE; stableOrder.clear();
+        chrome.storage.local.set({ showCompletedFavorites: showCompleted }); renderFavoritesList();
+    });
     for (const [id, isIntro] of [['setIntroHere', true], ['setOutroHere', false]]) {
         document.getElementById(id).addEventListener('click', () => {
             chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
@@ -117,7 +134,11 @@ document.addEventListener('DOMContentLoaded', () => {
         chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
             if (tabs.length === 0) return;
             chrome.tabs.sendMessage(tabs[0].id, { action: "getNiceTitle" }, { frameId: 0 }, (titleResponse) => {
-                if (chrome.runtime.lastError) return;
+                const connectionError = chrome.runtime.lastError;
+                const stale = connectionError || !titleResponse?.contextActive || titleResponse?.scriptVersion !== chrome.runtime.getManifest().version;
+                document.getElementById('pageRefreshNotice').style.display = stale ? 'block' : 'none';
+                document.getElementById('pageRefreshReason').textContent = connectionError || !titleResponse ? '页面尚未连接扩展，刷新后重试。' : stale ? '页面脚本已失效或版本较旧，刷新后恢复进度记录。' : '';
+                if (connectionError) return;
                 if (titleResponse && titleResponse.series) {
                     currentPageInfo = titleResponse;
                     document.getElementById('episodeScopeRow').style.display = titleResponse.collectionId ? 'block' : 'none';
@@ -354,6 +375,7 @@ document.getElementById('addFavBtn').addEventListener('click', () => {
         if (tabs.length === 0) return;
         chrome.tabs.sendMessage(tabs[0].id, { action: "getNiceTitle" }, { frameId: 0 }, (titleResponse) => {
             if (chrome.runtime.lastError) { showFloatingToast("请刷新视频页面后重试"); return; }
+            if (titleResponse?.pending) { showFloatingToast('分P列表正在加载，请稍后再收藏'); return; }
             chrome.tabs.sendMessage(tabs[0].id, { action: "getRequestVideoInfo" }, (videoResponse) => {
                 if (chrome.runtime.lastError) { }
                 if (!videoResponse) { showFloatingToast("❌ 失败：未检测到视频"); return; }
@@ -429,7 +451,7 @@ function showFloatingToast(msg) {
 
 function mutateFavorites(operation, onSaved) {
     SkipperCore.mutate(operation, (data, error) => {
-        if (error) { showFloatingToast(`❌ ${error}`); return; }
+        if (error) { renderFavoritesList(); showFloatingToast(`❌ ${error}`); return; }
         currentFavorites = data.favorites;
         stableOrder.clear();
         currentFolders = data.favFolders;
@@ -464,6 +486,7 @@ function renderFolderSelect(selectValue) {
 function renderFavoritesList() {
     const listDiv = document.getElementById('favList');
     const currentFolder = document.getElementById('folderSelect').value;
+    document.getElementById('completedCount').textContent = '';
 
     if (!currentFavorites || Object.keys(currentFavorites).length === 0) {
         listDiv.innerHTML = '<div style="padding:15px; text-align:center; color:#999; font-size:12px;">暂无收藏</div>';
@@ -481,6 +504,9 @@ function renderFavoritesList() {
         });
     }
 
+    const completedCount = sortedItems.filter(item => item.seriesCompleted === true).length;
+    document.getElementById('completedCount').textContent = completedCount ? `(${completedCount})` : '';
+    if (!showCompleted) sortedItems = sortedItems.filter(item => item.seriesCompleted !== true);
     const recentTime = item => Math.max(item.timestamp || 0, item.lastOpenedAt || 0);
     sortedItems.sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned)
         || (a.pinned && b.pinned ? (a.pinnedAt || 0) - (b.pinnedAt || 0) : 0)
@@ -489,7 +515,7 @@ function renderFavoritesList() {
     sortedItems.forEach((item, index) => { if (!stableOrder.has(item.id || item.series)) stableOrder.set(item.id || item.series, index); });
 
     if (sortedItems.length === 0) {
-        const msg = currentFolder === "__ALL__" ? "暂无任何收藏" : `"${currentFolder}" 为空`;
+        const msg = completedCount && !showCompleted ? `已隐藏 ${completedCount} 部已看完收藏，勾选“已看”可找回` : currentFolder === "__ALL__" ? "暂无任何收藏" : `"${currentFolder}" 为空`;
         listDiv.innerHTML = `<div style="padding:15px; text-align:center; color:#999; font-size:12px;">${SkipperCore.escapeHtml(msg)}</div>`;
         return;
     }
@@ -522,10 +548,14 @@ function renderFavoritesList() {
                 <span class="fav-time">${formatTime(item.time)} / ${formatTime(item.duration)}</span>
             </div>
             <div class="fav-actions" style="position: absolute; right: 5px; top: 5px; display: none;">
-                <button class="btn-move" title="移动文件夹" style="border:1px solid #ddd; background:#fff; cursor:pointer; font-size:10px; margin-right:2px;">📂</button>
                 <button class="btn-pin">${item.pinned ? '取消置顶' : '置顶'}</button>
                 ${item.collectionId || item.episodeProgress ? '<button class="btn-episodes" title="展开集数与进度">选集</button>' : ''}
                 <button class="btn-del" title="删除" style="border:1px solid #ffcccc; background:#fff; color:red; cursor:pointer; font-size:10px;">×</button>
+            </div>
+            <div class="fav-quick fav-actions">
+                <button class="btn-watched" title="切换最近记录这一集的已看状态">${SkipperCore.watchState(item, item) === '已看完' ? '✓ 本集' : '本集已看'}</button>
+                <button class="btn-series-complete" title="标记整部作品已看完并隐藏，可从已看列表恢复">${item.seriesCompleted ? '取消全集已看' : '全集已看'}</button>
+                <select class="quick-folder" aria-label="移动到文件夹" title="选择文件夹后立即移动"></select>
             </div>
         `;
 
@@ -547,7 +577,7 @@ function renderFavoritesList() {
 
         div.querySelector('.btn-del').addEventListener('click', (e) => {
             e.stopPropagation();
-            if (confirm(`删除 "${item.series}"?`)) {
+            if (confirm(`删除「${item.series}」？开启账号同步时，删除也会同步到其他电脑。`)) {
                 mutateFavorites({ type: 'delete', key: item.series, id: item.id });
             }
         });
@@ -566,72 +596,62 @@ function renderFavoritesList() {
             const records = Object.values(item.episodeProgress || {});
             if (!records.some(r => SkipperCore.canonicalUrl(r.url) === SkipperCore.canonicalUrl(item.url))) records.push(item);
             const entries = item.catalog?.length ? item.catalog : records.map(r => ({ number: SkipperCore.episodeNumber(r.episode), title: r.episode, record: r }));
-            [...entries].sort((a, b) => (a.number ?? 0) - (b.number ?? 0)).forEach(entry => {
-                const matches = records.filter(r => SkipperCore.episodeNumber(r.episode) === entry.number);
+            [...entries].sort((a, b) => (a.part ?? a.number ?? 0) - (b.part ?? b.number ?? 0)).forEach(entry => {
+                const matches = records.filter(r => entry.url ? SkipperCore.canonicalUrl(r.url) === SkipperCore.canonicalUrl(entry.url) : SkipperCore.episodeNumber(r.episode) === entry.number);
                 const record = entry.record || (matches.length === 1 ? matches[0] : null);
-                const state = !record || !record.time ? '未看' : record.duration > 0 && (record.time / record.duration >= .95 || record.duration - record.time < 30) ? '已看完' : '看到一半';
+                const state = SkipperCore.watchState(item, record, entry);
                 const button = document.createElement('button');
-                button.textContent = `${entry.number === null ? entry.title : `第${entry.number}集`} · ${state}${record?.time ? ` · ${formatTime(record.time)}` : ''}`;
-                button.title = entry.title;
+                const label = entry.part ? (/^\d+$/.test(entry.title) ? `第${Number(entry.title)}集` : entry.title) : entry.number === null ? entry.title : `第${entry.number}集`;
+                button.textContent = `${label} · ${state}${record?.time ? ` · ${formatTime(record.time)}` : ''}`;
+                button.title = `${entry.title}${entry.part ? `（P${entry.part}）` : ''}`;
                 button.addEventListener('click', e => {
                     e.stopPropagation();
-                    let url = record?.url;
+                    let url = record?.url || entry.url;
                     if (!url && item.collectionId && entry.number !== null) { const target = new URL(item.url); target.searchParams.delete('t'); target.searchParams.set('skipper_collection', item.collectionId); target.searchParams.set('skipper_episode', String(entry.number)); url = target.href; }
                     if (SkipperCore.validUrl(url)) mutateFavorites({ type: 'open', key: item.series, id: item.id }, () => chrome.tabs.create({ url: SkipperCore.resumeUrl(url, state === '已看完' ? 0 : record?.time || 0) }));
                 });
-                panel.appendChild(button);
+                const cell = document.createElement('div'); cell.className = 'episode-cell';
+                const mark = document.createElement('button'); mark.className = 'episode-mark';
+                mark.textContent = state === '已看完' ? '✓' : '○';
+                mark.title = state === '已看完' ? '标记为未看' : '标记为已看';
+                const markUrl = entry.url || record?.url;
+                mark.disabled = !SkipperCore.watchKey(markUrl, entry.number);
+                mark.addEventListener('click', e => {
+                    e.stopPropagation();
+                    mutateFavorites({ type: 'watched', key: item.series, id: item.id, url: markUrl,
+                        number: entry.number, watched: state !== '已看完' });
+                });
+                cell.appendChild(button); cell.appendChild(mark); panel.appendChild(cell);
             });
             if (!item.catalog?.length) { const hint = document.createElement('div'); hint.className = 'episode-hint'; hint.textContent = '播放合集视频后补全目录'; panel.appendChild(hint); }
             div.appendChild(panel);
         }
 
-        div.querySelector('.btn-move').addEventListener('click', (e) => {
+        const folderSelect = div.querySelector('.quick-folder');
+        currentFolders.forEach(folder => {
+            const option = document.createElement('option'); option.value = folder; option.textContent = folder;
+            folderSelect.appendChild(option);
+        });
+        folderSelect.value = item.folder || '默认收藏';
+        folderSelect.addEventListener('click', e => e.stopPropagation());
+        folderSelect.addEventListener('change', e => {
+            e.stopPropagation(); const target = e.target.value;
+            mutateFavorites({ type: 'move', key: item.series, id: item.id, folder: target }, () => showFloatingToast(`已移到 ${target}`));
+        });
+        div.querySelector('.btn-watched').addEventListener('click', e => {
             e.stopPropagation();
-
-            targetMoveSeries = item.series;
-            const moveSelect = document.getElementById('moveTargetSelect');
-            moveSelect.innerHTML = '';
-
-            currentFolders.forEach(folder => {
-                const opt = document.createElement('option');
-                opt.value = folder;
-                opt.innerText = folder;
-
-                if (folder === (item.folder || "默认收藏")) {
-                    opt.innerText += " (当前)";
-                    opt.selected = true;
+            mutateFavorites({ type: 'watched', key: item.series, id: item.id, url: item.url,
+                watched: SkipperCore.watchState(item, item) !== '已看完' });
+        });
+        div.querySelector('.btn-series-complete').addEventListener('click', e => {
+            e.stopPropagation();
+            mutateFavorites({ type: 'completeSeries', key: item.series, id: item.id, completed: !item.seriesCompleted }, () => {
+                if (!item.seriesCompleted) {
+                    showCompleted = false; document.getElementById('showCompleted').checked = false;
+                    chrome.storage.local.set({ showCompletedFavorites: false }); renderFavoritesList();
+                    showFloatingToast('已标记全集已看并隐藏，可勾选“已看”找回');
                 }
-                moveSelect.appendChild(opt);
             });
-
-            const newOpt = document.createElement('option');
-            newOpt.value = "__NEW__";
-            newOpt.innerText = "➕ 新建文件夹...";
-            newOpt.style.color = "#00aeec";
-            moveSelect.appendChild(newOpt);
-
-            moveSelect.onchange = function() {
-                if (this.value === "__NEW__") {
-                    const newName = prompt("请输入新文件夹名称:");
-                    if (newName && !currentFolders.includes(newName)) {
-                        currentFolders.push(newName);
-                        mutateFavorites({ type: 'addFolder', folder: newName });
-                        renderFolderSelect();
-
-                        const tempOpt = document.createElement('option');
-                        tempOpt.value = newName;
-                        tempOpt.innerText = newName;
-                        tempOpt.selected = true;
-                        moveSelect.insertBefore(tempOpt, newOpt);
-                        moveSelect.value = newName;
-                    } else {
-                        moveSelect.value = item.folder || "默认收藏";
-                    }
-                }
-            };
-
-            const moveModal = document.getElementById('moveModal');
-            moveModal.style.display = 'flex';
         });
 
         fragment.appendChild(div);

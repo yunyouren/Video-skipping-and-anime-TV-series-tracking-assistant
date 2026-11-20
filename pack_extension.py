@@ -15,7 +15,7 @@ def pack_extension():
     if not re.fullmatch(r'\d+(?:\.\d+){0,3}', version):
         raise ValueError('Invalid extension version')
     items = [
-        'manifest.json', 'background.js', 'tracker-core.js', 'content.js',
+        'manifest.json', 'background.js', 'tracker-core.js', 'browser-sync.js', 'content.js',
         'popup.html', 'popup.js', 'options.html', 'options.js', 'icon.png',
         'README.md', 'PRIVACY.md', '_locales', 'releases',
     ]

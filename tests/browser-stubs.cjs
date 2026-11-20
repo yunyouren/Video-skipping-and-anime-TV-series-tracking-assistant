@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { webcrypto } = require('node:crypto');
 const root = path.resolve(__dirname, '..');
 const source = name => fs.readFileSync(path.join(root, name), 'utf8');
 const copy = x => x === undefined ? undefined : structuredClone(x);
@@ -69,10 +70,13 @@ function env({ initial = {}, bus = makeBus(initial), title = '示例番剧 第1�
             }, onChanged: { addListener(f) { bus.listeners.push(f); } }
         },
         runtime: {
+            id: 'test-extension',
+            getURL(file) { return `chrome-extension://test-extension/${file}`; },
+            getManifest() { return JSON.parse(source('manifest.json')); },
             onMessage: { addListener(f) { listeners.push(f); } }, onInstalled: { addListener(f) { installs.push(f); } },
             sendMessage(message, cb) {
                 messages.push(copy(message));
-                bus.jobs.push(() => bus.background.dispatch(message, { frameId: iframe ? 1 : 0, tab: { id: 1, title: iframe ? '示例番剧 第1集' : document.title, url: iframe ? 'https://example.test/play/1' : window.location.href } }, cb || (() => {})));
+                bus.jobs.push(() => bus.background.dispatch(message, { url: html ? chrome.runtime.getURL(html) : window.location.href, frameId: iframe ? 1 : 0, tab: { id: 1, title: iframe ? '示例番剧 第1集' : document.title, url: iframe ? 'https://example.test/play/1' : window.location.href } }, cb || (() => {})));
             }, openOptionsPage() {}
         },
         tabs: {
@@ -81,18 +85,19 @@ function env({ initial = {}, bus = makeBus(initial), title = '示例番剧 第1�
                 if (typeof options === 'function') cb = options;
                 bus.jobs.push(() => {
                     if (bus.top && message.action !== 'getRequestVideoInfo') { bus.top.dispatch(message, {}, cb); return; }
-                    cb?.(message.action === 'getNiceTitle' ? { series: '示例番剧', sourceSeries: '示例番剧', episode: '第1集', site: 'Web', url }
+                    cb?.(message.action === 'getNiceTitle' ? { series: '示例番剧', sourceSeries: '示例番剧', episode: '第1集', site: 'Web', url, scriptVersion: JSON.parse(source('manifest.json')).version, contextActive: true }
                         : message.action === 'clickNext' ? { clicked: !!bus.topClicked }
                         : { series: '示例番剧', episode: '第1集', site: 'Web', url: url + '?t=600', time: 600, duration: 1200, timestamp: now });
                 });
-            }, create(data) { opened.push(data); }
+            }, create(data) { opened.push(data); }, reload(id, options, cb) { bus.reloadedTab = id; cb?.(); }
         }, i18n: { getMessage() { return ''; } }
     };
     class FakeURL extends URL {
         static createObjectURL(blob) { blobs.push(blob); return 'blob:test'; }
         static revokeObjectURL() {}
     }
-    const context = vm.createContext({ document, window, chrome, console, Blob, URL: FakeURL,
+    if (bus.syncStorage) chrome.storage.sync = bus.syncStorage;
+    const context = vm.createContext({ document, window, chrome, console, Blob, URL: FakeURL, crypto: webcrypto, TextEncoder,
         Date: class extends Date { constructor(...args) { super(...(args.length ? args : [now])); } static now() { return now; } },
         setTimeout() { return 1; }, clearTimeout() {}, MutationObserver: class { observe() {} },
         alert(x) { alerts.push(x); }, confirm() { return true; }, prompt() { return '改名后的番剧'; },
@@ -119,6 +124,7 @@ function env({ initial = {}, bus = makeBus(initial), title = '示例番剧 第1�
             await this.flush();
         },
         async tick(v, ms = 1500, flush = true) { now += ms; v.fire('timeupdate'); if (flush) await this.flush(); },
+        advanceTime(ms) { now += ms; },
         async mutate(op) { let response; chrome.runtime.sendMessage({ action: 'mutateFavorites', operation: op }, r => { response = r; }); await this.flush(); return response; }
     };
     return e;

@@ -138,10 +138,16 @@
     .episode-panel .episode-hint { grid-column:1/-1; font-size:10px; color:#9199a2; }
     .fav-actions button { font-size:10px; border:0; background:#f0f8ff; padding:3px 4px; border-radius:3px; cursor:pointer; }
     .fav-item:hover .fav-series { padding-right:110px; }
+    .fav-quick { display:flex; gap:6px; align-items:center; margin-top:5px; }
+    .fav-quick .quick-folder { width:100px; margin:0 0 0 auto; padding:2px 4px; font-size:10px; color:#78838f; background:#fafbfd; border-color:#e8edf1; }
+    .episode-cell { display:flex; min-width:0; }
+    .episode-cell > button:first-child { flex:1; min-width:0; }
+    .episode-cell .episode-mark { flex:0 0 23px; margin-left:2px; text-align:center; color:#079acb; }
   </style>
 </head>
 <body>
   <h3 data-i18n="popupTitle">⚡ 全能视频跳略与追番剧助手</h3>
+  <div id="pageRefreshNotice" style="display:none;padding:8px;margin-bottom:8px;background:#fff8e8;color:#846127;border-radius:5px;font-size:11px"><span id="pageRefreshReason"></span> <button id="reloadVideoPage" class="quiet-btn">刷新视频页</button></div>
 
   <div class="box-container">
     <div class="box-header">
@@ -166,6 +172,7 @@
     </div>
     <div class="data-toolbar">
       <div class="sort-tools"><select id="sortMode" aria-label="收藏排序"><option value="recent">最近观看</option><option value="name">名称排序</option></select><button id="refreshOrder" class="icon-btn" title="刷新排序" aria-label="刷新排序">↻</button></div>
+      <label style="font-size:10px;color:#78838f;white-space:nowrap" title="显示标记为全集已看的收藏"><input id="showCompleted" type="checkbox" style="vertical-align:middle;margin:0 2px 0 0">已看<span id="completedCount"></span></label>
       <div class="data-actions">
         <input type="file" id="importInput" style="display: none;" accept=".json">
         <button id="btnOpenExportModal" class="btn-link" data-i18n="btnExport">⬇ 导出</button>
