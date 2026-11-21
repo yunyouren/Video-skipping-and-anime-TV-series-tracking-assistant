@@ -1,0 +1,42 @@
+name: Submit update to Chrome Web Store
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to submit (must match manifest.json)
+        required: true
+        type: string
+      submit:
+        description: Upload and submit for review (off only checks store access and status)
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chrome-web-store-publish
+  cancel-in-progress: false
+
+jobs:
+  submit:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run regression tests and build package
+        if: inputs.submit
+        run: |
+          node --test tests/*.test.cjs
+          python3 pack_extension.py
+      - name: Check Chrome Web Store status or submit for review
+        env:
+          CHROME_VERSION: ${{ inputs.version }}
+          CHROME_SUBMIT: ${{ inputs.submit }}
+          CHROME_PUBLISHER_ID: ${{ secrets.CHROME_PUBLISHER_ID }}
+          CHROME_SERVICE_ACCOUNT_JSON: ${{ secrets.CHROME_SERVICE_ACCOUNT_JSON }}
+        run: node .github/scripts/publish_chrome.cjs
