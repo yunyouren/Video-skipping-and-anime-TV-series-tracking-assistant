@@ -2,8 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { env, Element, favorite, video } = require('./browser-stubs.cjs');
 
-async function partsPage({ bv = 'BV1f3RcBKENW', part = 9, active = part, labels = ['01','02','03','04','05','07','08','09','10','11','12','13'], initial = {}, legacy = false } = {}) {
-    const title = '沃德朴一家（第一季/英配）';
+async function partsPage({ bv = 'BV1f3RcBKENW', part = 9, active = part, labels = ['01','02','03','04','05','07','08','09','10','11','12','13'],
+    initial = {}, legacy = false, standalone = false, title = '沃德朴一家（第一季/英配）' } = {}) {
     const h1 = new Element(); h1.textContent = title;
     const nodes = labels.map(text => {
         const node = new Element(), label = new Element(); label.title = text; label.textContent = text;
@@ -15,6 +15,11 @@ async function partsPage({ bv = 'BV1f3RcBKENW', part = 9, active = part, labels 
     const v = video(100), url = `https://www.bilibili.com/video/${bv}/?p=${part}`;
     const selectors = { '.video-title': h1, h1 };
     if (legacy) { selectors['#multi_page'] = group; }
+    else if (standalone) {
+        group.querySelectorAll = selector => selector === ':scope > .video-pod__item' ? nodes : [];
+        group.querySelector = selector => selector === ':scope > .video-pod__item.active' ? nodes[active - 1] : null;
+        selectors['.video-pod > .video-pod__body > .video-pod__list.multip'] = group;
+    }
     else selectors['.video-pod .simple-base-item.active.head'] = head;
     const e = env({ title: `${labels[part - 1]}_哔哩哔哩_bilibili`, url, videos: [v], initial, selectors });
     await e.boot('content.js');
@@ -32,6 +37,35 @@ test('P9 reads title 10 and scopes favorite and catalog to the BV', async () => 
     assert.equal(new URL(item.catalog[8].url).searchParams.get('p'), '9');
     assert.equal(item.episode, '第10集');
     assert.ok(p.e.context.SkipperCore.parseBackup(p.e.context.SkipperCore.makeBackup(p.e.bus.data.favorites, [])).favorites[info.series].catalog[8].part === 9);
+});
+test('standalone Bilibili parts use the video title, actual P11 label and part order', async () => {
+    const labels = Array.from({ length: 15 }, (_, i) => `分P内容 ${i + 1}`);
+    labels[10] = '10_DCAC_单相逆变与方波_四个开关，翻出交流';
+    const title = '电力电子技术 速通版 2小时';
+    const p = await partsPage({ bv: 'BV1bus96AEhB', part: 11, standalone: true, labels, title });
+    const info = p.info();
+    assert.equal(info.pending, false);
+    assert.equal(info.series, title);
+    assert.equal(info.episode, labels[10]);
+    assert.equal(info.collectionId, 'bilibili:video:BV1bus96AEhB');
+    await p.e.mutate({ type: 'add', item: favorite({ series: title, collectionId: info.collectionId, url: p.url }) });
+    await p.e.tick(p.v); await p.e.tick(p.v, 2500);
+    const { catalog } = p.e.bus.data.favorites[title];
+    assert.equal(catalog.length, 15);
+    assert.equal(new URL(catalog[10].url).searchParams.get('p'), '11');
+    let reply;
+    p.e.dispatch({ action: 'clickNext' }, {}, result => reply = result);
+    assert.equal(reply.clicked, true);
+    assert.equal(p.nodes[11].clicks, 1);
+});
+test('standalone parts wait for the active row to match the URL', async () => {
+    for (const active of [0, 2]) {
+        const p = await partsPage({ part: 3, active, standalone: true, labels: ['序章', '正片', '花絮'] });
+        assert.equal(p.info().pending, true);
+        let reply;
+        p.e.dispatch({ action: 'clickNext' }, {}, result => reply = result);
+        assert.equal(reply.clicked, false);
+    }
 });
 test('next follows actual part order across missing labels and stops at end', async () => {
     const p = await partsPage({ part: 5 });

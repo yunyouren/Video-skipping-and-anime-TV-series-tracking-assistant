@@ -376,11 +376,13 @@ function getBiliParts() {
     // Scope to the active BV: a category collection can contain hundreds of other parts.
     const head = document.querySelector('.video-pod .simple-base-item.active.head');
     const group = head?.closest('.multi-p');
+    const standalone = group ? null : document.querySelector('.video-pod > .video-pod__body > .video-pod__list.multip');
     const legacy = document.querySelector('#multi_page');
-    const nodes = group ? [...group.querySelectorAll('.page-item')]
-        : legacy ? [...legacy.querySelectorAll('.list-box li, .cur-list li')] : [];
+    const list = group || standalone || legacy;
+    const itemSelector = group ? '.page-item' : standalone ? ':scope > .video-pod__item' : '.list-box li, .cur-list li';
+    const nodes = list ? [...list.querySelectorAll(itemSelector)] : [];
     const part = Number(url.searchParams.get('p') || 1);
-    if (nodes.length < 2 && part <= 1 && !group) return null;
+    if (nodes.length < 2 && part <= 1 && !group && !standalone) return null;
     const entries = nodes.map((node, index) => {
         const label = node.querySelector('.title') || node.querySelector('.part');
         const text = (label?.getAttribute('title') || label?.textContent || '').trim() || `P${index + 1}`;
@@ -388,9 +390,9 @@ function getBiliParts() {
         return { node, title: text, number: SkipperCore.episodeNumber(text) ?? index + 1, part: index + 1, url: target.href };
     });
     const current = entries[part - 1];
-    const active = group?.querySelector('.page-item.active') || legacy?.querySelector('.list-box .on, .cur-list .on');
-    const activeIndex = active ? nodes.indexOf(active) + 1 : part;
-    const ready = !!current && activeIndex === part && (!head || (head.querySelector('.title')?.getAttribute('title') || '').trim() === title);
+    const active = list?.querySelector(list === legacy ? '.list-box .on, .cur-list .on' : `${itemSelector}.active`);
+    const ready = !!current && (active ? active === current.node : !standalone)
+        && (!head || (head.querySelector('.title')?.getAttribute('title') || '').trim() === title);
     const episodeName = current ? (/^\d+$/.test(current.title) ? `第${Number(current.title)}集` : current.title) : `P${part}`;
     return { seriesName: title, episodeName, part, entries, ready,
         collectionId: `bilibili:video:${bv}`, collectionUrl: `https://www.bilibili.com/video/${bv}/`, url: url.href };
