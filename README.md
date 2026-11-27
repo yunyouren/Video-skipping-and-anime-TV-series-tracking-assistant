@@ -1,9 +1,13 @@
 # 视频跳略与追番追剧助手
 
-[![Version](https://img.shields.io/badge/version-4.11.2-00aeec)](manifest.json)
+[![Version](https://img.shields.io/badge/version-4.11.3-00aeec)](manifest.json)
 ![Manifest V3](https://img.shields.io/badge/Manifest-V3-blue)
 
 适用于 Chrome / Edge 的视频辅助扩展：设置片头片尾跳过、记录每集播放进度、管理追番收藏，并在下次打开时续看。数据保存在当前浏览器，支持按需开启浏览器账号同步。
+
+## v4.11.3 更新
+
+修复 B 站合集内的视频使用不同标题时，收藏一直提示「分P列表正在加载」的问题。通过 BV 号确认当前视频，再保存它的分 P 目录。[更新记录](releases/v4.11.3.md)
 
 ## v4.11.2 更新
 
