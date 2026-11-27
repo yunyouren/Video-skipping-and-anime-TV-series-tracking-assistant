@@ -23,8 +23,13 @@
         try { const u = new URL(value); return /(^|\.)bilibili\.com$/.test(u.hostname) ? /\/video\/(BV[a-zA-Z0-9]+)/.exec(u.pathname)?.[1] || null : null; } catch { return null; }
     }
     function episodeNumber(value) {
-        const m = String(value || '').match(/第\s*(\d+)\s*[集话]|(?:Ep\.?|Vol\.?|P)\s*(\d+)|^\s*(\d+)(?:\s|$|[~～-])/i);
-        return m ? Number(m[1] || m[2] || m[3]) : null;
+        const m = String(value || '').match(/^\s*第\s*(\d+)\s*期\s*$|第\s*(\d+)\s*[集话]|(?:Ep\.?|Vol\.?|P)\s*(\d+)|^\s*(\d+)(?:\s|$|[~～-])/i);
+        return m ? Number(m[1] || m[2] || m[3] || m[4]) : null;
+    }
+    function episodeLabel(entry) {
+        if ((entry.part && !/^\d+$/.test(entry.title)) || entry.number === null) return entry.title;
+        const marker = entry.title.match(/第\s*\d+\s*[集话期]/)?.[0];
+        return marker?.endsWith('期') ? marker : `第${entry.number}集`;
     }
     function sameEpisode(item, info, url) {
         if (!canonicalUrl(item.url) || canonicalUrl(item.url) !== canonicalUrl(url)) return false;
@@ -121,7 +126,7 @@
             if (!url && item.collectionId && entry.number !== null) {
                 const target = new URL(item.url); target.searchParams.delete('t'); target.searchParams.set('skipper_collection', item.collectionId); target.searchParams.set('skipper_episode', String(entry.number)); url = target.href;
             }
-            return { ...entry, label: entry.part && !/^\d+$/.test(entry.title) ? entry.title : entry.number === null ? entry.title : `第${entry.number}集`,
+            return { ...entry, label: episodeLabel(entry),
                 state: watchState(item, entry.record, entry), openUrl: url, markUrl: entry.url || entry.record?.url };
         });
     }
@@ -284,5 +289,5 @@
             callback?.(error ? null : response.data, error || null);
         });
     }
-    root.SkipperCore = { defaultFolders, escapeHtml, validUrl, canonicalUrl, resumeUrl, episodeNumber, sameEpisode, findFavorite, parseBackup, makeBackup, settings, watchKey, watchState, episodeEntries, applyMutation, mutate, contextValid, onInvalidated, sendMessage, scriptVersion };
+    root.SkipperCore = { defaultFolders, escapeHtml, validUrl, canonicalUrl, resumeUrl, episodeNumber, episodeLabel, sameEpisode, findFavorite, parseBackup, makeBackup, settings, watchKey, watchState, episodeEntries, applyMutation, mutate, contextValid, onInvalidated, sendMessage, scriptVersion };
 })(globalThis);

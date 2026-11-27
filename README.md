@@ -1,9 +1,13 @@
 # 视频跳略与追番追剧助手
 
-[![Version](https://img.shields.io/badge/version-4.11.1-00aeec)](manifest.json)
+[![Version](https://img.shields.io/badge/version-4.11.2-00aeec)](manifest.json)
 ![Manifest V3](https://img.shields.io/badge/Manifest-V3-blue)
 
 适用于 Chrome / Edge 的视频辅助扩展：设置片头片尾跳过、记录每集播放进度、管理追番收藏，并在下次打开时续看。数据保存在当前浏览器，支持按需开启浏览器账号同步。
+
+## v4.11.2 更新
+
+B 站标题中的「第 04 期」等编号可用于记录进度。同一合集里的同名课程可以单独收藏，选集只显示该课程的各期。网页选集尚未就绪时，扩展会在短时间内重试。[更新记录](releases/v4.11.2.md)
 
 ## v4.11.1 更新
 

@@ -601,7 +601,7 @@ function renderFavoritesList() {
                 const record = entry.record || (matches.length === 1 ? matches[0] : null);
                 const state = SkipperCore.watchState(item, record, entry);
                 const button = document.createElement('button');
-                const label = entry.part ? (/^\d+$/.test(entry.title) ? `第${Number(entry.title)}集` : entry.title) : entry.number === null ? entry.title : `第${entry.number}集`;
+                const label = SkipperCore.episodeLabel(entry);
                 button.textContent = `${label} · ${state}${record?.time ? ` · ${formatTime(record.time)}` : ''}`;
                 button.title = `${entry.title}${entry.part ? `（P${entry.part}）` : ''}`;
                 button.addEventListener('click', e => {

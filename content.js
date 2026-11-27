@@ -169,10 +169,9 @@ function tryClickNext() {
     if (collection) {
         const current = SkipperCore.episodeNumber(collection.episodeName);
         if (current === null) return false;
-        const candidates = [...collection.root.querySelectorAll('.simple-base-item .title')]
-            .filter(el => SkipperCore.episodeNumber(el.getAttribute('title') || el.textContent) === current + 1);
+        const candidates = getBiliCollectionEntries(collection).filter(entry => entry.number === current + 1);
         if (candidates.length !== 1) return false;
-        candidates[0].click();
+        candidates[0].node.click();
         return true;
     }
     const selectors = [
@@ -397,6 +396,10 @@ function getBiliParts() {
     return { seriesName: title, episodeName, part, entries, ready,
         collectionId: `bilibili:video:${bv}`, collectionUrl: `https://www.bilibili.com/video/${bv}/`, url: url.href };
 }
+function parseBiliPeriod(title) {
+    const match = title.match(/^(.*?)\s*(第\s*(\d+)\s*[集话期])/);
+    return match?.[2].endsWith('期') ? { series: match[1].trim(), episode: match[2], number: Number(match[3]) } : null;
+}
 function getBiliCollection() {
     if (!/(^|\.)bilibili\.com$/.test(new URL(window.location.href).hostname)) return null;
     const link = document.querySelector('.video-pod__header a[href*="collectiondetail?"]');
@@ -407,24 +410,43 @@ function getBiliCollection() {
     const root = link.closest('.video-pod');
     const h1 = document.querySelector('h1');
     if (!root || !h1) return null;
-    const title = h1.getAttribute('title') || h1.textContent || '';
+    const title = (h1.getAttribute('title') || h1.textContent || '').trim();
+    const collectionId = `bilibili:collection:${sid}`;
+    const collectionUrl = `${url.origin}${url.pathname}?sid=${sid}`;
+    const period = parseBiliPeriod(title);
+    if (period?.series) {
+        const seriesKey = name => name.normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+        const key = seriesKey(period.series);
+        const entries = [];
+        for (const node of root.querySelectorAll('.simple-base-item .title')) {
+            const title = (node.getAttribute('title') || node.textContent || '').trim();
+            const entry = parseBiliPeriod(title);
+            if (entry && seriesKey(entry.series) === key) entries.push({ node, title, number: entry.number });
+        }
+        // A mixed playlist only identifies a series when its titles agree and each issue is unique.
+        if (entries.length < 2 || new Set(entries.map(entry => entry.number)).size !== entries.length
+            || !entries.some(entry => entry.title === title)) return null;
+        return { entries, seriesName: period.series, episodeName: period.episode,
+            collectionId: `${collectionId}:series:${key}`, collectionUrl, url: window.location.href };
+    }
     const episode = title.match(/第\s*\d+\s*[集话]/)?.[0];
     // A category collection (e.g. 美漫) is not a series identity.
     if (!episode) return null;
-    return { root, seriesName: (link.textContent || '').trim(), episodeName: episode,
-        collectionId: `bilibili:collection:${sid}`, collectionUrl: `${url.origin}${url.pathname}?sid=${sid}`,
-        url: window.location.href };
+    return { root, seriesName: (link.textContent || '').trim(), episodeName: episode, collectionId, collectionUrl, url: window.location.href };
+}
+function getBiliCollectionEntries(collection) {
+    return collection.entries ?? [...collection.root.querySelectorAll('.simple-base-item .title')].map(node => {
+        const title = node.getAttribute('title') || node.textContent || '';
+        return { node, title, number: SkipperCore.episodeNumber(title) };
+    }).filter(entry => entry.number !== null);
 }
 function syncCatalog(info, found) {
     if (!found || !info.collectionId) return;
     const parts = getBiliParts();
-    const collection = getBiliCollection();
-    if (!parts && !collection) return;
     if (parts && !parts.ready) return;
-    const episodes = parts ? parts.entries.map(({ node, ...entry }) => entry) : [...collection.root.querySelectorAll('.simple-base-item .title')].map(el => {
-        const title = el.getAttribute('title') || el.textContent || '';
-        return { title, number: SkipperCore.episodeNumber(title) };
-    }).filter(e => e.number !== null);
+    const collection = parts ? null : getBiliCollection();
+    const entries = parts?.entries ?? (collection ? getBiliCollectionEntries(collection) : []);
+    const episodes = entries.map(({ node, ...entry }) => entry);
     const signature = `${found[1].id}:${JSON.stringify(episodes)}`;
     if (!episodes.length || signature === catalogSignature) return;
     catalogSignature = signature;
@@ -435,12 +457,13 @@ function pendingEpisodeSelection() {
     const target = url.searchParams.get('skipper_episode');
     const cid = url.searchParams.get('skipper_collection');
     if (!target || !cid) return false;
-    if (!pendingEpisodeSelection.started) pendingEpisodeSelection.started = Date.now();
-    if (Date.now() - pendingEpisodeSelection.started > 10000) {
+    const now = Date.now();
+    if (!pendingEpisodeSelection.started) pendingEpisodeSelection.started = now;
+    if (now - pendingEpisodeSelection.started > 10000) {
         url.searchParams.delete('skipper_episode'); url.searchParams.delete('skipper_collection');
         window.history.replaceState(null, '', url.href);
         showToast('自动选集未完成，请在网页中选择集数');
-        pendingEpisodeSelection.clicked = false; pendingEpisodeSelection.started = 0;
+        pendingEpisodeSelection.clickedAt = 0; pendingEpisodeSelection.started = 0;
         return false;
     }
     const collection = getBiliCollection();
@@ -449,11 +472,16 @@ function pendingEpisodeSelection() {
     if (SkipperCore.episodeNumber(collection.episodeName) === Number(target)) {
         url.searchParams.delete('skipper_episode'); url.searchParams.delete('skipper_collection');
         window.history.replaceState(null, '', url.href);
+        pendingEpisodeSelection.clickedAt = 0; pendingEpisodeSelection.started = 0;
         return false;
     }
-    const matches = [...collection.root.querySelectorAll('.simple-base-item .title')].filter(el => SkipperCore.episodeNumber(el.getAttribute('title') || el.textContent) === Number(target));
+    const matches = getBiliCollectionEntries(collection).filter(entry => entry.number === Number(target));
     if (matches.length === 1) {
-        if (!pendingEpisodeSelection.clicked) { pendingEpisodeSelection.clicked = true; matches[0].click(); }
+        // Playlist rows can appear before their click handlers are ready.
+        if (!pendingEpisodeSelection.clickedAt || now - pendingEpisodeSelection.clickedAt >= 1000) {
+            pendingEpisodeSelection.clickedAt = now;
+            matches[0].node.click();
+        }
     } else showToast('找不到唯一匹配的集数，请在网页中选集');
     return true;
 }
@@ -466,12 +494,14 @@ const SITE_STRATEGIES = [
             const parts = getBiliParts();
             if (parts) { const { entries, ready, ...info } = parts; return { ...info, pending: !ready }; }
             const collection = getBiliCollection();
-            if (collection) { const { root, ...info } = collection; return info; }
+            if (collection) { const { root, entries, ...info } = collection; return info; }
             // 1. 锁定"系列名称" (Series):
             // B站视频的总标题通常在 .video-title (新版) 或 H1 中，这个标题在切P时不会变
             const h1 = document.querySelector('.video-title') || document.querySelector('#viewbox_report h1') || document.querySelector('h1');
             // 如果获取不到 title 属性，就取 innerText
             const seriesName = h1 ? (h1.title || h1.innerText).trim() : "";
+            const period = parseBiliPeriod(seriesName);
+            if (period) return { seriesName, episodeName: period.episode };
 
             // 2. 锁定"集数名称" (Episode):
             let episodeName = "";

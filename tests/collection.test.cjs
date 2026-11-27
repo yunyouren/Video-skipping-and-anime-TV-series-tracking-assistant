@@ -15,6 +15,55 @@ async function collectionPlayer(initial = {}) {
     let info; e.dispatch({ action: 'getNiceTitle' }, {}, x => info = x);
     return { e, v, h1, next, info };
 }
+
+async function periodPlayer(title, labels, url = 'https://www.bilibili.com/video/BV1HWxq6kECj/') {
+    const h1 = new Element(); h1.title = title; h1.textContent = title;
+    const link = new Element('a'); link.href = '//space.bilibili.com/43202722/channel/collectiondetail?sid=9155944';
+    link.textContent = '磁集成LLC';
+    const entries = labels.map(label => { const node = new Element(); node.title = label; return node; });
+    const root = new Element(); root.querySelectorAll = () => entries; link.closest = () => root;
+    const v = video(100);
+    const e = env({ title: `${title}_哔哩哔哩_bilibili`, videos: [v], url,
+        selectors: { '.video-pod__header a[href*="collectiondetail?"]': link, h1, '.video-title': h1 } });
+    await e.boot('content.js');
+    let info; e.dispatch({ action: 'getNiceTitle' }, {}, result => info = result);
+    return { e, v, entries, info };
+}
+
+test('numbered Bilibili course uses its own series inside a mixed collection', async () => {
+    const first = 'AI 时代的电源 DSP 课 第0期｜课程介绍';
+    const fourth = 'AI时代的电源DSP课 第04期｜零警告，三个坑：让ePWM自己发波';
+    const labels = [first, '其他教程 第05期｜实验', fourth, 'AI时代的电源DSP课 第05期｜上下文管理'];
+    const { e, v, entries, info } = await periodPlayer(fourth, labels);
+    assert.equal(info.series, 'AI时代的电源DSP课');
+    assert.equal(info.episode, '第04期');
+    const earlier = await periodPlayer(first, labels, 'https://www.bilibili.com/video/BV1Q6ni6VENc/');
+    assert.equal(earlier.info.collectionId, info.collectionId);
+    assert.notEqual(info.collectionId, 'bilibili:collection:9155944');
+
+    e.bus.top = e;
+    const popup = env({ html: 'popup.html', bus: e.bus }); await popup.boot('popup.js');
+    popup.el('addFavBtn').click(); await popup.flush();
+    await e.tick(v); await e.tick(v, 2500);
+    const saved = e.bus.data.favorites[info.series];
+    assert.equal(saved.episode, '第04期');
+    assert.deepEqual(Array.from(saved.catalog, entry => entry.number), [0, 4, 5]);
+    assert.equal(e.context.SkipperCore.episodeEntries(saved)[1].label, '第04期');
+
+    let reply; e.dispatch({ action: 'clickNext' }, {}, result => reply = result);
+    assert.equal(reply.clicked, true);
+    assert.equal(entries[1].clicks ?? 0, 0);
+    assert.equal(entries[3].clicks, 1);
+});
+
+test('an isolated numbered video keeps its own title and explicit episode', async () => {
+    const title = '其他教程 第04期｜实验';
+    const { info } = await periodPlayer(title, [title, '另一个专题 第05期｜实验']);
+    assert.equal(info.series, title);
+    assert.equal(info.episode, '第04期');
+    assert.equal(info.collectionId, undefined);
+});
+
 test('collection metadata uses real episode and stable id, not playlist position', async () => {
     const { info } = await collectionPlayer();
     assert.equal(info.episode, '第138话');
@@ -81,4 +130,19 @@ test('unwatched episode navigation selects inside the collection before recordin
     assert.equal(e.bus.data.favorites['收藏'].episode, '第139话');
     assert.ok(!e.window.location.href.includes('skipper_episode'));
     assert.equal(e.bus.data.favorites['收藏'].catalog[0].number, 139);
+});
+
+test('episode selection retries after the site has had time to attach its player controls', async () => {
+    const { e, v, h1, next } = await collectionPlayer();
+    e.window.location.href += '?skipper_collection=bilibili%3Acollection%3A5892471&skipper_episode=139';
+    e.window.history = { replaceState(_, __, url) { e.window.location.href = url; } };
+    await e.tick(v);
+    await e.tick(v, 200);
+    assert.equal(next.clicks, 1);
+    await e.tick(v, 1200);
+    assert.equal(next.clicks, 2);
+    h1.textContent = '宝可梦地平线 第139话';
+    await e.tick(v, 1200);
+    assert.equal(next.clicks, 2);
+    assert.ok(!e.window.location.href.includes('skipper_episode'));
 });
