@@ -3,15 +3,19 @@ const assert = require('node:assert/strict');
 const { env, Element, favorite, video } = require('./browser-stubs.cjs');
 
 async function partsPage({ bv = 'BV1f3RcBKENW', part = 9, active = part, labels = ['01','02','03','04','05','07','08','09','10','11','12','13'],
-    initial = {}, legacy = false, standalone = false, title = '沃德朴一家（第一季/英配）' } = {}) {
+    initial = {}, legacy = false, standalone = false, title = '沃德朴一家（第一季/英配）', listTitle = title, listBv } = {}) {
     const h1 = new Element(); h1.textContent = title;
     const nodes = labels.map(text => {
         const node = new Element(), label = new Element(); label.title = text; label.textContent = text;
         node.querySelector = () => label; return node;
     });
-    const headTitle = new Element(); headTitle.title = title;
+    const headTitle = new Element(); headTitle.title = listTitle;
     const head = new Element(); head.querySelector = () => headTitle;
     const group = new Element(); group.querySelectorAll = () => nodes; group.querySelector = () => nodes[active - 1]; head.closest = () => group;
+    if (listBv) {
+        const wrapper = new Element(); wrapper['data-key'] = listBv;
+        group.closest = selector => selector === '.video-pod__item[data-key^="BV"]' ? wrapper : null;
+    }
     const v = video(100), url = `https://www.bilibili.com/video/${bv}/?p=${part}`;
     const selectors = { '.video-title': h1, h1 };
     if (legacy) { selectors['#multi_page'] = group; }
@@ -61,6 +65,27 @@ test('standalone Bilibili parts use the video title, actual P11 label and part o
 test('standalone parts wait for the active row to match the URL', async () => {
     for (const active of [0, 2]) {
         const p = await partsPage({ part: 3, active, standalone: true, labels: ['序章', '正片', '花絮'] });
+        assert.equal(p.info().pending, true);
+        let reply;
+        p.e.dispatch({ action: 'clickNext' }, {}, result => reply = result);
+        assert.equal(reply.clicked, false);
+    }
+});
+test('multipart collection matches a playlist title alias by the wrapper BV', async () => {
+    const bv = 'BV1ATNWzeEFN';
+    const title = '【飞佛 Phineas and Ferb】5/1+1.5 暑假街霸&今日阴转妈妈';
+    const p = await partsPage({ bv, part: 1, title, listBv: bv,
+        listTitle: 'S5E01p1+p2 暑假街霸&今日阴转妈妈', labels: ['OP', '暑', '假'] });
+    const info = p.info();
+    assert.equal(info.pending, false);
+    assert.equal(info.series, title);
+    assert.equal(info.episode, 'OP');
+    assert.equal(info.collectionId, `bilibili:video:${bv}`);
+});
+
+test('matching display titles do not bypass a stale BV or an unset active part', async () => {
+    for (const settings of [{ listBv: 'BV1ATNWzeEFN' }, { listBv: 'BV1f3RcBKENW', active: 0 }]) {
+        const p = await partsPage(settings);
         assert.equal(p.info().pending, true);
         let reply;
         p.e.dispatch({ action: 'clickNext' }, {}, result => reply = result);

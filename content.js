@@ -390,8 +390,10 @@ function getBiliParts() {
     });
     const current = entries[part - 1];
     const active = list?.querySelector(list === legacy ? '.list-box .on, .cur-list .on' : `${itemSelector}.active`);
-    const ready = !!current && (active ? active === current.node : !standalone)
-        && (!head || (head.querySelector('.title')?.getAttribute('title') || '').trim() === title);
+    // The collection can give the same BV a shorter display title.
+    const listBv = group?.closest('.video-pod__item[data-key^="BV"]')?.getAttribute('data-key');
+    const matchesVideo = listBv ? listBv === bv : !head || (head.querySelector('.title')?.getAttribute('title') || '').trim() === title;
+    const ready = !!current && matchesVideo && (active ? active === current.node : !standalone && !listBv);
     const episodeName = current ? (/^\d+$/.test(current.title) ? `第${Number(current.title)}集` : current.title) : `P${part}`;
     return { seriesName: title, episodeName, part, entries, ready,
         collectionId: `bilibili:video:${bv}`, collectionUrl: `https://www.bilibili.com/video/${bv}/`, url: url.href };
